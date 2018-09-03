@@ -12,7 +12,7 @@ pub fn print_node(node: &Node) -> String {
     };
 
     format!(
-        "{:spaces$}├─── {}",
+        "{:spaces$}├── {}",
         "",
         path_name,
         spaces = (node.depth * 4)
