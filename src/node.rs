@@ -21,21 +21,56 @@ impl Node {
     }
 }
 
-pub fn get_nodes(root: PathBuf) -> Node {
+pub struct Options {
+    max_depth: Option<usize>,
+    follow_sym_links: bool,
+    show_hidden: bool,
+}
+
+impl Options {
+    pub fn new(max_depth: Option<usize>, follow_sym_links: bool, show_hidden: bool) -> Options {
+        Options {
+            max_depth,
+            follow_sym_links,
+            show_hidden,
+        }
+    }
+
+    pub fn default() -> Options {
+        Options {
+            max_depth: None,
+            follow_sym_links: false,
+            show_hidden: false,
+        }
+    }
+}
+
+pub fn get_nodes(root: PathBuf, options: Options) -> Node {
     let mut curr = Node {
         path: root,
         children: Vec::new(),
         depth: 0,
         is_last: false,
     };
-    get_nodes_recursive(&mut curr);
+    get_nodes_recursive(&mut curr, &options);
     curr
 }
 
-fn get_nodes_recursive(root: &mut Node) {
+fn get_nodes_recursive(root: &mut Node, options: &Options) {
     if !root.path.is_dir() {
         return;
     }
+    if let Some(max_depth) = options.max_depth {
+        if root.depth == max_depth {
+            return;
+        }
+    }
+    let metadata = fs::symlink_metadata(root.path.clone()).expect("failed to fetch file meta data");
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() && !options.follow_sym_links {
+        return;
+    }
+
     for entry in fs::read_dir(root.path.as_path()).expect("failed to read path") {
         let path = entry.unwrap().path();
         let mut curr = Node {
@@ -44,7 +79,7 @@ fn get_nodes_recursive(root: &mut Node) {
             depth: root.depth + 1,
             is_last: false,
         };
-        get_nodes_recursive(&mut curr);
+        get_nodes_recursive(&mut curr, &options);
         root.children.push(curr)
     }
 }

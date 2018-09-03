@@ -6,6 +6,6 @@ use tre::node::*;
 
 fn main() {
     let path = PathBuf::from(".");
-    let root = get_nodes(path);
+    let root = get_nodes(path, Options::default());
     root.print();
 }
