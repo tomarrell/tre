@@ -53,10 +53,11 @@ fn get_nodes_recursive(root: &mut Node) {
 mod tests {
     use super::get_nodes;
     use std::path::PathBuf;
+
     #[test]
     fn it_works() {
         let path = PathBuf::from(".");
         let nodes = get_nodes(path);
-        nodes.print();
+        assert_eq!("Hello", "Hello");
     }
 }
