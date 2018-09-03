@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct Node {
     pub depth: usize,
     pub path: PathBuf,
+    pub is_last: bool,
     pub children: Vec<Node>,
 }
 
@@ -25,6 +26,7 @@ pub fn get_nodes(root: PathBuf) -> Node {
         path: root,
         children: Vec::new(),
         depth: 0,
+        is_last: false,
     };
     get_nodes_recursive(&mut curr);
     curr
@@ -40,6 +42,7 @@ fn get_nodes_recursive(root: &mut Node) {
             path,
             children: Vec::new(),
             depth: root.depth + 1,
+            is_last: false,
         };
         get_nodes_recursive(&mut curr);
         root.children.push(curr)
