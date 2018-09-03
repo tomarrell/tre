@@ -80,13 +80,16 @@ fn get_nodes_recursive(root: &mut Node, options: &Options) {
     if !root.path.is_dir() {
         return;
     }
+
     if let Some(max_depth) = options.max_depth {
         if root.depth == max_depth {
             return;
         }
     }
+
     let metadata = fs::symlink_metadata(root.path.clone()).expect("failed to fetch file meta data");
     let file_type = metadata.file_type();
+
     if file_type.is_symlink() && !options.follow_sym_links {
         return;
     }
@@ -102,11 +105,14 @@ fn get_nodes_recursive(root: &mut Node, options: &Options) {
         get_nodes_recursive(&mut curr, &options);
         root.children.push(curr);
     }
+
     let n = root.children.len();
+
     if n > 0 {
         let last = &mut root.children[n - 1];
         last.is_last = true;
     }
+
     root.children.sort();
 }
 
