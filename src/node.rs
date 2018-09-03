@@ -86,13 +86,12 @@ fn get_nodes_recursive(root: &mut Node, options: &Options) {
 
 #[cfg(test)]
 mod tests {
-    use super::get_nodes;
-    use std::path::PathBuf;
+    use super::*;
 
     #[test]
     fn it_works() {
-        let path = PathBuf::from(".");
-        let nodes = get_nodes(path);
-        assert_eq!("Hello", "Hello");
+        let path = PathBuf::from("./src");
+        let nodes = get_nodes(path, Options::default());
+        assert_eq!(nodes.print(), nodes.print());
     }
 }
