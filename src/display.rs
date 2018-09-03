@@ -1,15 +1,8 @@
 use std::path::PathBuf;
 
-#[macro_use]
-use std::fmt;
+use node::Node;
 
-pub struct Node {
-    pub depth: usize,
-    pub path: PathBuf,
-    pub children: Vec<Node>,
-}
-
-pub fn print_node(node: Node) -> String {
+pub fn print_node(node: &Node) -> String {
     let optional_path = match node.path.file_name() {
         Some(name) => name.to_str(),
         None => return String::new(),
@@ -20,7 +13,12 @@ pub fn print_node(node: Node) -> String {
         None => panic!("Failed to decode path name"),
     };
 
-    format!("{:spaces$}├─── {}", "", path_name, spaces=(node.depth * 4))
+    format!(
+        "{:spaces$}├─── {}",
+        "",
+        path_name,
+        spaces = (node.depth * 4)
+    )
 }
 
 #[cfg(test)]
@@ -35,7 +33,7 @@ mod tests {
             children: vec![],
         };
 
-        assert_eq!("    ├─── filename.rs", print_node(node)) ;
+        assert_eq!("    ├─── filename.rs", print_node(node));
     }
 
     #[test]
@@ -46,7 +44,7 @@ mod tests {
             children: vec![],
         };
 
-        assert_eq!("            ├─── otherfile.rs", print_node(node)) ;
+        assert_eq!("            ├─── otherfile.rs", print_node(node));
     }
 
     #[test]
