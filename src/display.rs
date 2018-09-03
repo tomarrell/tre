@@ -1,5 +1,4 @@
 use node::Node;
-use std::path::PathBuf;
 
 pub fn print_node(node: &Node) -> String {
     let optional_path = match node.path.file_name() {
@@ -30,6 +29,7 @@ pub fn print_node(node: &Node) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn print_node_works() {

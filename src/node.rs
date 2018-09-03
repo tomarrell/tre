@@ -42,9 +42,9 @@ impl PartialEq for Node {
 }
 
 pub struct Options {
-    max_depth: Option<usize>,
-    follow_sym_links: bool,
-    show_hidden: bool,
+    pub max_depth: Option<usize>,
+    pub follow_sym_links: bool,
+    pub show_hidden: bool,
 }
 
 impl Options {
