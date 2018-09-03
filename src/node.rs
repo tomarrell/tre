@@ -1,7 +1,9 @@
 use display::print_node;
+use std::cmp::Ordering;
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Eq)]
 pub struct Node {
     pub depth: usize,
     pub path: PathBuf,
@@ -18,6 +20,24 @@ impl Node {
         for child in self.children.iter() {
             child.print();
         }
+    }
+}
+
+impl Ord for Node {
+    fn cmp(&self, other: &Node) -> Ordering {
+        self.path.cmp(&other.path)
+    }
+}
+
+impl PartialOrd for Node {
+    fn partial_cmp(&self, other: &Node) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Node) -> bool {
+        self.path == other.path
     }
 }
 
@@ -80,8 +100,14 @@ fn get_nodes_recursive(root: &mut Node, options: &Options) {
             is_last: false,
         };
         get_nodes_recursive(&mut curr, &options);
-        root.children.push(curr)
+        root.children.push(curr);
     }
+    let n = root.children.len();
+    if n > 0 {
+        let last = &mut root.children[n - 1];
+        last.is_last = true;
+    }
+    root.children.sort();
 }
 
 #[cfg(test)]
