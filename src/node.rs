@@ -15,10 +15,10 @@ pub struct Node {
 
 impl Node {
     pub fn print(&self) {
-        println!("{}", print_node(&self));
         if !self.path.is_dir() {
             return;
         }
+
         for child in self.children.iter() {
             child.print();
         }
@@ -79,6 +79,8 @@ pub fn get_nodes(root: PathBuf, options: Options) -> Node {
 }
 
 fn get_nodes_recursive(root: &mut Node, options: &Options) {
+    println!("{}", print_node(&root));
+
     if !root.path.is_dir() {
         return;
     }
