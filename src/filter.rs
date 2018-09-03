@@ -1,12 +1,12 @@
 use node::{Node, Options};
 
 pub struct Actions {
-    print: bool,
-    dive: bool,
+    pub print: bool,
+    pub dive: bool,
 }
 
-pub fn validate_node(node: Node, options: Options) -> Actions {
-    if !options.show_hidden && is_node_hidden(&node) {
+pub fn validate_node(node: &Node, options: &Options) -> Actions {
+    if !options.show_hidden && is_node_hidden(node) {
         return Actions {
             print: false,
             dive: false,
@@ -51,7 +51,7 @@ mod tests {
             is_last: false,
             children: vec![],
         };
-        let result = validate_node(node, Options::default());
+        let result = validate_node(&node, &Options::default());
         assert!(result.print);
         assert!(result.dive);
     }
@@ -64,7 +64,7 @@ mod tests {
             is_last: false,
             children: vec![],
         };
-        let result = validate_node(node, Options::default());
+        let result = validate_node(&node, &Options::default());
         assert!(!result.print);
         assert!(!result.dive);
     }

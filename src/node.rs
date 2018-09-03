@@ -1,7 +1,9 @@
-use display::print_node;
 use std::cmp::Ordering;
 use std::fs;
 use std::path::PathBuf;
+
+use display::print_node;
+use filter::validate_node;
 
 #[derive(Eq)]
 pub struct Node {
@@ -102,7 +104,18 @@ fn get_nodes_recursive(root: &mut Node, options: &Options) {
             depth: root.depth + 1,
             is_last: false,
         };
-        get_nodes_recursive(&mut curr, &options);
+
+        let validation = validate_node(&curr, &options);
+
+        // Without print authority, simply move to next node
+        if !validation.print {
+            continue;
+        }
+
+        if validation.dive {
+            get_nodes_recursive(&mut curr, &options);
+        }
+
         root.children.push(curr);
     }
 
