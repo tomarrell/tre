@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use node::Node;
 
 pub fn print_node(node: &Node) -> String {
