@@ -1,3 +1,6 @@
+extern crate clap;
+extern crate ignore;
+
+pub mod config;
 pub mod display;
-pub mod node;
-pub mod filter;
+pub mod walker;
