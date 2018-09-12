@@ -5,6 +5,9 @@ pub struct Options {
     pub follow_sym_links: bool,
     pub show_hidden: bool,
     pub root: Option<String>,
+    pub dir_only: bool,
+    pub pattern: Option<String>,
+    pub extension: Option<String>,
 }
 
 impl Options {
@@ -13,12 +16,18 @@ impl Options {
         max_depth: Option<usize>,
         follow_sym_links: bool,
         show_hidden: bool,
+        dir_only: bool,
+        pattern: Option<String>,
+        extension: Option<String>,
     ) -> Options {
         Options {
             root,
             max_depth,
             follow_sym_links,
             show_hidden,
+            dir_only,
+            pattern,
+            extension,
         }
     }
 }
@@ -29,8 +38,8 @@ pub fn parse_args() -> Options {
         .author("Jacky Zhen. <me@jackyzhen.com>, Tom Arrell. <me@tom.arrell.com>")
         .about("List contents of directories in a tree-like format.")
         .arg(
-            Arg::with_name("directory")
-                .help("Target a specific directory.")
+            Arg::with_name("path")
+                .help("Start from specific path.")
                 .index(1)
                 .takes_value(true),
         ).arg(
@@ -44,12 +53,6 @@ pub fn parse_args() -> Options {
                 .short("a")
                 .long("all")
                 .help("All files are printed. By default tre  does  not  print  hidden files  (those  beginning  with a dot `.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
-                .takes_value(false),
-        ).arg(
-            Arg::with_name("full")
-                .short("f")
-                .long("full")
-                .help("Prints the full path prefix for each file.")
                 .takes_value(false),
         ).arg(
             Arg::with_name("links")
@@ -70,6 +73,12 @@ pub fn parse_args() -> Options {
                 .long("pattern")
                 .help("filter with a name pattern.")
                 .takes_value(true),
+        ).arg(
+            Arg::with_name("extension")
+                .short("e")
+                .long("extension")
+                .help("filter with a file extension.")
+                .takes_value(true),
         ).get_matches();
 
     let max_depth: Option<usize> = match matches.value_of("level") {
@@ -78,10 +87,13 @@ pub fn parse_args() -> Options {
     };
 
     Options::new(
-        matches.value_of("directory").map(|s| s.to_string()),
+        matches.value_of("path").map(|s| s.to_string()),
         max_depth,
         matches.is_present("links"),
         matches.is_present("all"),
+        matches.is_present("directories"),
+        matches.value_of("pattern").map(|s| s.to_string()),
+        matches.value_of("extension").map(|s| s.to_string()),
     )
 }
 
