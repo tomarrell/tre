@@ -55,14 +55,14 @@ pub fn parse_args() -> Options {
                 .help("All files are printed. By default tre  does  not  print  hidden files  (those  beginning  with a dot `.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
                 .takes_value(false),
         ).arg(
-            Arg::with_name("links")
-                .short("l")
-                .long("links")
+            Arg::with_name("symbolic")
+                .short("s")
+                .long("symbolic")
                 .help("Follows symbolic links if they point to directories, as if they were directories")
                 .takes_value(false),
         ).arg(
             Arg::with_name("level")
-                .short("L")
+                .short("l")
                 .long("level")
                 .help("Max display depth of the directory tree.")
                 .validator(is_numeric)
