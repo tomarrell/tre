@@ -20,6 +20,7 @@ pub fn build(opt: &Options) -> Result<Walk, Error> {
     walker.follow_links(opt.follow_sym_links);
     walker.max_depth(opt.max_depth);
     walker.hidden(!opt.show_hidden);
+    walker.git_ignore(!opt.show_hidden);
     walker.sort_by_file_name(|a, b| a.cmp(b));
 
     Ok(walker.build())

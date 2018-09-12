@@ -89,7 +89,7 @@ pub fn parse_args() -> Options {
     Options::new(
         matches.value_of("path").map(|s| s.to_string()),
         max_depth,
-        matches.is_present("links"),
+        matches.is_present("symbolic"),
         matches.is_present("all"),
         matches.is_present("directories"),
         matches.value_of("pattern").map(|s| s.to_string()),
