@@ -8,6 +8,7 @@ pub struct Options {
     pub dir_only: bool,
     pub pattern: Option<String>,
     pub extension: Option<String>,
+    pub line_count: bool,
 }
 
 impl Options {
@@ -19,6 +20,7 @@ impl Options {
         dir_only: bool,
         pattern: Option<String>,
         extension: Option<String>,
+        line_count: bool,
     ) -> Options {
         Options {
             root,
@@ -28,6 +30,7 @@ impl Options {
             dir_only,
             pattern,
             extension,
+            line_count,
         }
     }
 }
@@ -79,6 +82,12 @@ pub fn parse_args() -> Options {
                 .long("extension")
                 .help("filter with a file extension.")
                 .takes_value(true),
+        ).arg(
+            Arg::with_name("linecount")
+                .short("c")
+                .long("linecount")
+                .help("count and display lines of files.")
+                .takes_value(false),
         ).get_matches();
 
     let max_depth: Option<usize> = match matches.value_of("level") {
@@ -94,6 +103,7 @@ pub fn parse_args() -> Options {
         matches.is_present("directories"),
         matches.value_of("pattern").map(|s| s.to_string()),
         matches.value_of("extension").map(|s| s.to_string()),
+        matches.is_present("linecount"),
     )
 }
 

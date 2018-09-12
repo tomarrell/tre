@@ -17,6 +17,7 @@ fn stream_tree(opt: &Options) -> Result<(), Error> {
     let mut files = 0;
     let mut directories = 1;
     let mut links = 0;
+    let mut lines = 0;
 
     if let Some(Ok(mut prev)) = walker.next() {
         for dir in walker {
@@ -48,12 +49,12 @@ fn stream_tree(opt: &Options) -> Result<(), Error> {
                     prev_depth = curr_depth;
                     is_last = true;
                 }
-                display::print(&prev, is_last, &parents);
+                lines += display::print(&prev, is_last, &parents, opt.line_count)?;
                 prev = curr;
             }
         }
-        display::print(&prev, true, &parents);
+        lines += display::print(&prev, true, &parents, opt.line_count)?;
     }
-    display::print_stats(files, directories, links);
+    display::print_stats(files, directories, links, lines, opt.line_count);
     Ok(())
 }
