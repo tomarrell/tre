@@ -55,7 +55,12 @@ pub fn print(
         (Some(typ), true) if typ.is_file() => {
             let mut f = File::open(dir.path())?;
             let mut s = String::new();
-            f.read_to_string(&mut s)?;
+
+            match f.read_to_string(&mut s) {
+                Ok(_) => (),
+                Err(_) => (),
+            };
+
             Some(s.lines().count())
         }
         _ => None,
@@ -86,6 +91,9 @@ pub fn print_stats(
 
 #[cfg(test)]
 mod tests {
-
+    #[test]
+    fn it_works() {
+        assert_eq!("it works", "it works");
+    }
 }
 

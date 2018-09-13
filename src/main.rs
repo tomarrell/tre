@@ -7,6 +7,7 @@ use tre::display;
 use tre::walker;
 
 fn main() {
+    // TODO: prevent this from being able to panic
     stream_tree(&parse_args()).expect("Something went wrong...")
 }
 
@@ -27,7 +28,6 @@ fn stream_tree(opt: &Options) -> Result<(), Error> {
                         directories += 1;
                     }
                     Some(typ) if opt.dir_only && !typ.is_dir() => {
-                        directories += 1;
                         continue;
                     }
                     Some(typ) if typ.is_symlink() => {
@@ -40,21 +40,26 @@ fn stream_tree(opt: &Options) -> Result<(), Error> {
 
                 let curr_depth = curr.depth();
                 let mut is_last = false;
+
                 if prev_depth != curr_depth {
                     if prev_depth < curr_depth && curr_depth > 1 {
                         parents.push(curr_depth)
                     } else {
                         parents.pop();
                     }
+
                     prev_depth = curr_depth;
                     is_last = true;
                 }
+
                 lines += display::print(&prev, is_last, &parents, opt.line_count)?;
                 prev = curr;
             }
         }
+
         lines += display::print(&prev, true, &parents, opt.line_count)?;
     }
+
     display::print_stats(files, directories, links, lines, opt.line_count);
     Ok(())
 }
