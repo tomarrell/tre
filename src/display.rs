@@ -19,10 +19,12 @@ pub fn dir_str(
         Some(count) => format!("{} {}", path, count),
         _ => path,
     };
+
     if depth == 0 {
         print_path
     } else {
         let mut indent = String::new();
+
         for i in 1..depth {
             indent = format!(
                 "{}{}{:space$}",
@@ -36,6 +38,7 @@ pub fn dir_str(
                 space = 4
             );
         }
+
         format!("{}{}── {}", indent, first_char, print_path)
     }
 }
@@ -80,3 +83,9 @@ pub fn print_stats(
         }
     );
 }
+
+#[cfg(test)]
+mod tests {
+
+}
+
