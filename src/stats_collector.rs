@@ -26,7 +26,7 @@ impl StatsCollector {
         StatsCollector {
             stats: Stats {
                 files: 0,
-                directories: 1,
+                directories: 0,
                 links: 0,
                 lines: None,
             },

@@ -31,20 +31,23 @@ impl Streamer {
             .next()
             .expect("could not get first element from walker")
             .expect("could not get first element from walker");
+        self.prev_depth = prev.depth();
 
         // walker traverses depth first
         for dir in walker {
             match dir {
                 Ok(curr) => {
-                    let _ = self.stream_node(&prev);
+                    self.curr_depth = curr.depth();
+                    self.stream_node(&prev)?;
                     prev = curr;
+                    self.prev_depth = self.curr_depth;
                 }
                 // TODO currently just ignore the dir if can't parse it
                 _ => continue,
             }
         }
 
-        display::print(&prev, true, &self.parent_depths, self.curr_line_count);
+        self.stream_node(&prev)?;
 
         println!("{}", self.collector);
         Ok(())
@@ -52,6 +55,7 @@ impl Streamer {
 
     fn stream_node(&mut self, node: &DirEntry) -> Result<(), Error> {
         let mut is_last = false;
+        let file_name = node.file_name().to_owned().into_string().unwrap();
 
         //parses current file type and tally stats
         let file_type = self.collector.parse_and_collect(node)?;
@@ -74,12 +78,17 @@ impl Streamer {
             } else {
                 self.parent_depths.pop();
             }
-
-            self.prev_depth = self.curr_depth;
             is_last = true;
         }
 
-        display::print(node, is_last, &self.parent_depths, self.curr_line_count);
+        display::print(
+            file_name,
+            file_type,
+            self.prev_depth,
+            is_last,
+            &self.parent_depths,
+            self.curr_line_count,
+        );
         Ok(())
     }
 }

@@ -6,3 +6,4 @@ authors = ["Jacky Zhen <me@jackyzhen.com>", "Tom Arrell <tom.arrell@gmail.com>"]
 [dependencies]
 clap = "2.32.0"
 ignore = "0.4.3"
+colored = "1.6.1"

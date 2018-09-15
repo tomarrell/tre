@@ -1,4 +1,5 @@
 extern crate clap;
+extern crate colored;
 extern crate ignore;
 
 pub mod config;
