@@ -113,3 +113,24 @@ fn is_numeric(val: String) -> Result<(), String> {
         Err(_) => Err(String::from("Value wasn't a valid number!")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_numeric_works() {
+        assert_eq!(is_numeric(String::from("2")), Ok(()));
+    }
+
+    #[test]
+    fn is_numeric_works_zero() {
+        assert_eq!(is_numeric(String::from("0")), Ok(()));
+    }
+
+    #[test]
+    fn is_numeric_works_invalid() {
+        let error = String::from("Value wasn't a valid number!");
+        assert_eq!(is_numeric(String::from("low")), Err(error));
+    }
+}
