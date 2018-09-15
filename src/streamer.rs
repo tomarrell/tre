@@ -2,6 +2,7 @@ use config::Options;
 use display;
 use ignore::{DirEntry, Error, Walk};
 use stats_collector::{FileType, StatsCollector};
+use walker::build_shallow;
 
 pub struct Streamer {
     prev_depth: usize,
@@ -12,6 +13,7 @@ pub struct Streamer {
     dir_only: bool,
     count_lines: bool,
     colours: bool,
+    options: Options,
 }
 
 impl Streamer {
@@ -25,6 +27,7 @@ impl Streamer {
             dir_only: opt.dir_only,
             count_lines: opt.line_count,
             colours: !opt.no_colours,
+            options: opt,
         }
     }
 
@@ -35,18 +38,12 @@ impl Streamer {
             .expect("could not get first element from walker");
         self.prev_depth = prev.depth();
 
-        // walker traverses depth first
-        for dir in walker {
-            match dir {
-                Ok(curr) => {
-                    self.curr_depth = curr.depth();
-                    self.stream_node(&prev, false)?;
-                    prev = curr;
-                    self.prev_depth = self.curr_depth;
-                }
-                // TODO currently just ignore the dir if can't parse it
-                _ => continue,
-            }
+        // walker traverses depth first, ignoring files/folders it can't parse or does not have permission to
+        for dir in walker.into_iter().filter_map(|e| e.ok()) {
+            self.curr_depth = dir.depth();
+            self.stream_node(&prev, false)?;
+            prev = dir;
+            self.prev_depth = self.curr_depth;
         }
 
         self.stream_node(&prev, true)?;
@@ -66,19 +63,35 @@ impl Streamer {
         match file_type {
             FileType::File if self.dir_only => return Ok(()),
             FileType::File if self.count_lines => {
-                self.curr_line_count = Some(self.collector.count_lines(node)?);
+                // if failed to count lines (.e.g. no permission to read file) just pretend its 0
+                self.curr_line_count = Some(self.collector.count_lines(node).unwrap_or(0));
             }
             _ => self.curr_line_count = None,
         }
 
+        let mut should_pop = false;
         // This logic allows us to keep record parents (store in vec) of the current file.
         // We are always traversing one file ahead of what we print, so we can tell whether the thing to print
         // is the last of its parent directory (when the depth changes)
+        // additional we build a shallow walker that tries to figure out if the paren dir is the last dir,
+        // if so we pop it from the vec stack because we don't need to print that branch afterwards.
         if self.prev_depth != self.curr_depth {
-            if self.prev_depth < self.curr_depth && self.curr_depth > 1 {
-                self.parent_depths.push(self.curr_depth);
+            if self.prev_depth < self.curr_depth {
+                if let Some(parent_path) = node.path().parent() {
+                    let mut shallow_walker = build_shallow(parent_path, &self.options)?
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                        .skip_while(|n| n.path() != node.path())
+                        .skip(1);
+
+                    if let Some(_) = shallow_walker.next() {
+                        self.parent_depths.push(self.prev_depth);
+                    } else {
+                        is_last = true;
+                    }
+                }
             } else {
-                self.parent_depths.pop();
+                should_pop = true;
                 is_last = true;
             }
         }
@@ -92,6 +105,9 @@ impl Streamer {
             self.curr_line_count,
             self.colours,
         );
+        if should_pop {
+            self.parent_depths.pop();
+        }
         Ok(())
     }
 }

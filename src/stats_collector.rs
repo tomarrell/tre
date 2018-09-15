@@ -54,11 +54,7 @@ impl StatsCollector {
         let mut f = File::open(entry.path())?;
         let mut s = String::new();
 
-        // TODO think of dealing with this case better
-        match f.read_to_string(&mut s) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        f.read_to_string(&mut s)?;
 
         let line_count = s.lines().count();
         self.stats.lines = match self.stats.lines {

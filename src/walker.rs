@@ -1,6 +1,7 @@
 use config::Options;
 use ignore::types::TypesBuilder;
 use ignore::{Error, Walk, WalkBuilder};
+use std::path::Path;
 
 pub fn build(opt: &Options) -> Result<Walk, Error> {
     let mut walker = WalkBuilder::new(opt.root.clone().unwrap_or(String::from(".")));
@@ -28,7 +29,30 @@ pub fn build(opt: &Options) -> Result<Walk, Error> {
     Ok(walker.build())
 }
 
-#[cfg(test)]
-mod tests {
+pub fn build_shallow(path: &Path, opt: &Options) -> Result<Walk, Error> {
+    let mut walker = WalkBuilder::new(path);
+    let mut builder = TypesBuilder::new();
 
+    if let Some(ref pattern) = opt.pattern {
+        builder.add("custom", &format!("*{}*", pattern))?;
+        builder.select("custom");
+    }
+
+    if let Some(ref extension) = opt.extension {
+        builder.add("ext", &format!("*.{}", extension))?;
+        builder.select("ext");
+    }
+
+    let types = builder.build()?;
+
+    walker.types(types);
+    walker.max_depth(Some(1));
+    walker.hidden(!opt.show_hidden);
+    walker.git_ignore(!opt.show_hidden);
+    walker.sort_by_file_name(|a, b| a.cmp(b));
+
+    Ok(walker.build())
 }
+
+#[cfg(test)]
+mod tests {}

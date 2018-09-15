@@ -37,7 +37,7 @@ pub fn dir_str(
             prefix = format!(
                 "{}{:space$}",
                 prefix,
-                if parents.contains(&i) || i == 1 {
+                if parents.contains(&i) {
                     PARENT_CHAR
                 } else {
                     " "
