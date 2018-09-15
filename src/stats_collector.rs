@@ -89,10 +89,20 @@ mod tests {
 
     #[test]
     fn print_stats() {
-        let stats = StatsCollector::new();
+        let mut stats = StatsCollector::new();
 
         assert_eq!(
-            "\nDirectories: 1, Files: 0, Symbolic Links: 0, Lines: 0",
+            "\nDirectories: 0, Files: 0, Symbolic Links: 0, Lines: 0",
+            format!("{}", stats)
+        );
+
+        stats.stats.directories = 10;
+        stats.stats.files = 10;
+        stats.stats.links = 10;
+        stats.stats.lines = Some(10);
+
+        assert_eq!(
+            "\nDirectories: 10, Files: 10, Symbolic Links: 10, Lines: 10",
             format!("{}", stats)
         );
     }

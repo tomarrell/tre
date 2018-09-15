@@ -64,8 +64,95 @@ pub fn print(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn it_works() {
-        assert_eq!("it works", "it works");
+    fn it_prints_directories() {
+        let dir = "test";
+        let s1 = dir_str(
+            dir.to_owned(),
+            FileType::Directory,
+            2,
+            false,
+            &vec![1],
+            None,
+        );
+
+        assert_eq!(
+            s1.to_string(),
+            format!("│   ├── {}", dir.white().bold())
+        );
+
+        let s2 = dir_str(
+            dir.to_owned(),
+            FileType::Directory,
+            5,
+            true,
+            &vec![1, 3],
+            None,
+        );
+
+        assert_eq!(
+            s2.to_string(),
+            format!("│       │       └── {}", dir.white().bold())
+        );
+
+        let s3 = dir_str(dir.to_owned(), FileType::Directory, 1, true, &vec![], None);
+
+        assert_eq!(s3.to_string(), format!("└── {}", dir.white().bold()));
+    }
+
+    #[test]
+    fn it_prints_files() {
+        let file = "test.rs";
+        let s1 = dir_str(
+            file.to_owned(),
+            FileType::File,
+            2,
+            false,
+            &vec![1],
+            Some(10),
+        );
+
+        assert_eq!(
+            s1.to_string(),
+            format!("│   ├── {} 10", file.normal())
+        );
+
+        let s2 = dir_str(file.to_owned(), FileType::File, 5, true, &vec![1, 3], None);
+
+        assert_eq!(
+            s2.to_string(),
+            format!("│       │       └── {}", file.normal())
+        );
+
+        let s3 = dir_str(file.to_owned(), FileType::File, 1, true, &vec![], None);
+
+        assert_eq!(s3.to_string(), format!("└── {}", file.normal()));
+    }
+
+    #[test]
+    fn it_prints_links() {
+        let link = "test";
+        let s1 = dir_str(link.to_owned(), FileType::Link, 2, false, &vec![1], None);
+
+        assert_eq!(
+            s1.to_string(),
+            format!("│   ├── {}", link.green().italic())
+        );
+
+        let s2 = dir_str(link.to_owned(), FileType::Link, 5, true, &vec![1, 3], None);
+
+        assert_eq!(
+            s2.to_string(),
+            format!("│       │       └── {}", link.green().italic())
+        );
+
+        let s3 = dir_str(link.to_owned(), FileType::Link, 1, true, &vec![], None);
+
+        assert_eq!(
+            s3.to_string(),
+            format!("└── {}", link.green().italic())
+        );
     }
 }
