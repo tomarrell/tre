@@ -1,4 +1,5 @@
 use ignore::{DirEntry, Error};
+use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Error as IOError;
@@ -31,6 +32,7 @@ impl StatsCollector {
             },
         }
     }
+
     pub fn parse_and_collect(&mut self, entry: &DirEntry) -> Result<FileType, Error> {
         match entry.file_type() {
             Some(typ) if typ.is_dir() => {
@@ -57,21 +59,41 @@ impl StatsCollector {
             Ok(_) => (),
             Err(_) => (),
         };
+
         let line_count = s.lines().count();
         self.stats.lines = match self.stats.lines {
             Some(l) => Some(l + line_count),
             None => Some(line_count),
         };
+
         Ok(line_count)
     }
+}
 
-    pub fn print_stats(&self) {
-        println!(
-            "\n{} directories, {} files, {} symbolic links, {} lines",
+impl fmt::Display for StatsCollector {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "\nDirectories: {}, Files: {}, Symbolic Links: {}, Lines: {}",
             self.stats.directories,
             self.stats.files,
             self.stats.links,
             self.stats.lines.unwrap_or(0)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_stats() {
+        let stats = StatsCollector::new();
+
+        assert_eq!(
+            "\nDirectories: 1, Files: 0, Symbolic Links: 0, Lines: 0",
+            format!("{}", stats)
         );
     }
 }

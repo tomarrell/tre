@@ -46,7 +46,7 @@ impl Streamer {
 
         display::print(&prev, true, &self.parent_depths, self.curr_line_count);
 
-        self.collector.print_stats();
+        println!("{}", self.collector);
         Ok(())
     }
 
