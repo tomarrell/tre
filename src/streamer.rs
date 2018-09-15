@@ -40,7 +40,7 @@ impl Streamer {
             match dir {
                 Ok(curr) => {
                     self.curr_depth = curr.depth();
-                    self.stream_node(&prev)?;
+                    self.stream_node(&prev, false)?;
                     prev = curr;
                     self.prev_depth = self.curr_depth;
                 }
@@ -49,14 +49,14 @@ impl Streamer {
             }
         }
 
-        self.stream_node(&prev)?;
+        self.stream_node(&prev, true)?;
 
         println!("{}", self.collector);
         Ok(())
     }
 
-    fn stream_node(&mut self, node: &DirEntry) -> Result<(), Error> {
-        let mut is_last = false;
+    fn stream_node(&mut self, node: &DirEntry, is_last: bool) -> Result<(), Error> {
+        let mut is_last = is_last;
         let file_name = node.file_name().to_owned().into_string().unwrap();
 
         //parses current file type and tally stats
@@ -76,11 +76,11 @@ impl Streamer {
         // is the last of its parent directory (when the depth changes)
         if self.prev_depth != self.curr_depth {
             if self.prev_depth < self.curr_depth && self.curr_depth > 1 {
-                self.parent_depths.push(self.curr_depth)
+                self.parent_depths.push(self.curr_depth);
             } else {
                 self.parent_depths.pop();
+                is_last = true;
             }
-            is_last = true;
         }
 
         display::print(
