@@ -11,6 +11,7 @@ pub struct Streamer {
     collector: StatsCollector,
     dir_only: bool,
     count_lines: bool,
+    colours: bool,
 }
 
 impl Streamer {
@@ -23,6 +24,7 @@ impl Streamer {
             collector: collector,
             dir_only: opt.dir_only,
             count_lines: opt.line_count,
+            colours: !opt.no_colours,
         }
     }
 
@@ -71,7 +73,7 @@ impl Streamer {
 
         // This logic allows us to keep record parents (store in vec) of the current file.
         // We are always traversing one file ahead of what we print, so we can tell whether the thing to print
-        // is the last of is directory (when the depth changes)
+        // is the last of its parent directory (when the depth changes)
         if self.prev_depth != self.curr_depth {
             if self.prev_depth < self.curr_depth && self.curr_depth > 1 {
                 self.parent_depths.push(self.curr_depth)
@@ -88,6 +90,7 @@ impl Streamer {
             is_last,
             &self.parent_depths,
             self.curr_line_count,
+            self.colours,
         );
         Ok(())
     }
