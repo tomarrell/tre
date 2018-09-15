@@ -12,7 +12,7 @@ pub enum FileType {
 
 pub struct Stats {
     files: usize,
-    directories: usize,
+    directories: isize,
     links: usize,
     lines: Option<usize>,
 }
@@ -26,7 +26,7 @@ impl StatsCollector {
         StatsCollector {
             stats: Stats {
                 files: 0,
-                directories: 0,
+                directories: -1,
                 links: 0,
                 lines: None,
             },
@@ -88,7 +88,7 @@ mod tests {
         let mut stats = StatsCollector::new();
 
         assert_eq!(
-            "\nDirectories: 0, Files: 0, Symbolic Links: 0, Lines: 0",
+            "\nDirectories: -1, Files: 0, Symbolic Links: 0, Lines: 0",
             format!("{}", stats)
         );
 
