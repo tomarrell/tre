@@ -9,37 +9,34 @@ pub struct Streamer {
     parent_depths: Vec<usize>,
     curr_line_count: Option<usize>,
     collector: StatsCollector,
-    walker: Walk,
     dir_only: bool,
     count_lines: bool,
 }
 
 impl Streamer {
-    pub fn new(opt: Options, collector: StatsCollector, walker: Walk) -> Streamer {
+    pub fn new(opt: Options, collector: StatsCollector) -> Streamer {
         Streamer {
             prev_depth: 0,
             curr_depth: 0,
             parent_depths: vec![],
             curr_line_count: None,
             collector: collector,
-            walker: walker,
             dir_only: opt.dir_only,
             count_lines: opt.line_count,
         }
     }
 
-    pub fn stream_tree(&mut self) -> Result<(), Error> {
-        let mut prev = self
-            .walker
+    pub fn stream_tree(&mut self, walker: &mut Walk) -> Result<(), Error> {
+        let mut prev = walker
             .next()
             .expect("could not get first element from walker")
             .expect("could not get first element from walker");
 
         // walker traverses depth first
-        for dir in self.walker {
+        for dir in walker {
             match dir {
                 Ok(curr) => {
-                    self.stream_node(&prev);
+                    let _ = self.stream_node(&prev);
                     prev = curr;
                 }
                 // TODO currently just ignore the dir if can't parse it
