@@ -4,12 +4,14 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::Error as IOError;
 
+/// Enum expressing the possible file types returned by Walker
 pub enum FileType {
     Directory,
     File,
     Link,
 }
 
+/// Aggregate statistics for the traversed filesystem
 pub struct Stats {
     files: usize,
     directories: isize,
@@ -17,6 +19,8 @@ pub struct Stats {
     lines: Option<usize>,
 }
 
+/// StatCollector is responsible for aggregating statistics as the filesystem is traversed,
+/// as well as parsing a DirEntry's file type
 pub struct StatsCollector {
     stats: Stats,
 }
@@ -33,6 +37,7 @@ impl StatsCollector {
         }
     }
 
+    /// Parse's and returns a file's type and update aggregate count statistics
     pub fn parse_and_collect(&mut self, entry: &DirEntry) -> Result<FileType, Error> {
         match entry.file_type() {
             Some(typ) if typ.is_dir() => {
@@ -50,6 +55,7 @@ impl StatsCollector {
         }
     }
 
+    /// Attempts to read contents of a file to count lines.
     pub fn count_lines(&mut self, entry: &DirEntry) -> Result<usize, IOError> {
         let mut f = File::open(entry.path())?;
         let mut s = String::new();

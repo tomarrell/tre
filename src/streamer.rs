@@ -4,6 +4,7 @@ use ignore::{DirEntry, Error, Walk};
 use stats_collector::{FileType, StatsCollector};
 use walker::build_shallow;
 
+/// Streamer represents the object traversing the filesystem, printing the structure and collecting stats.
 pub struct Streamer {
     prev_depth: usize,
     curr_depth: usize,
@@ -31,6 +32,7 @@ impl Streamer {
         }
     }
 
+    /// kicks off a recursive streaming of a directory file structure
     pub fn stream_tree(&mut self, walker: &mut Walk) -> Result<(), Error> {
         let mut prev = walker
             .next()
@@ -52,6 +54,7 @@ impl Streamer {
         Ok(())
     }
 
+    /// parse and stream an individual node, correctly printing its representation and updating statistics.
     fn stream_node(&mut self, node: &DirEntry, is_last: bool) -> Result<(), Error> {
         let mut is_last = is_last;
         let file_name = node.file_name().to_owned().into_string().unwrap();

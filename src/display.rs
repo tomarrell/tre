@@ -5,6 +5,7 @@ const PARENT_CHAR: &str = "│";
 const LAST_CHAR: &str = "└";
 const LINE_CHAR: &str = "├";
 
+/// generate the string representing the current file/directory
 pub fn dir_str(
     file_name: String,
     file_type: FileType,
@@ -50,6 +51,7 @@ pub fn dir_str(
     }
 }
 
+/// prints a single line to terminal, the current file/directory
 pub fn print(
     file_name: String,
     file_type: FileType,

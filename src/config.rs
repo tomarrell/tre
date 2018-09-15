@@ -1,5 +1,6 @@
 use clap::{App, Arg};
 
+/// Struct to hold command line arguments
 pub struct Options {
     pub max_depth: Option<usize>,
     pub follow_sym_links: bool,
@@ -38,6 +39,7 @@ impl Options {
     }
 }
 
+/// parses command line arguments using clap and returns an Option struct encapsulating those arguments.
 pub fn parse_args() -> Options {
     let matches = App::new("tre")
         .version("1.0")
