@@ -2,14 +2,24 @@ extern crate tre;
 
 use tre::*;
 
+use config;
+use stats_collector::StatsCollector;
+use streamer::Streamer;
+use walker;
+
 fn main() {
-    let options = tre::config::parse_args();
-    let collector = tre::stats_collector::StatsCollector::new();
+    let options = config::parse_args();
+    let collector = StatsCollector::new();
 
-    // TODO: decide how to handle errors
-    let mut walker = walker::build(&options).expect("could not create walker.");
+    let mut walker = match walker::build(&options) {
+        Ok(walk) => walk,
+        Err(error) => panic!(
+            "Failed to build directory walker with specified options.\n>>> {}",
+            error
+        ),
+    };
 
-    streamer::Streamer::new(options, collector)
+    Streamer::new(options, collector)
         .stream_tree(&mut walker)
         .expect("could not stream tree.");
 }

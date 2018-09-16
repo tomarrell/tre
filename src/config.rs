@@ -1,5 +1,6 @@
 use clap::{App, Arg};
 
+/// Struct to hold command line arguments
 pub struct Options {
     pub max_depth: Option<usize>,
     pub follow_sym_links: bool,
@@ -9,6 +10,7 @@ pub struct Options {
     pub pattern: Option<String>,
     pub extension: Option<String>,
     pub line_count: bool,
+    pub no_colours: bool,
 }
 
 impl Options {
@@ -21,6 +23,7 @@ impl Options {
         pattern: Option<String>,
         extension: Option<String>,
         line_count: bool,
+        no_colours: bool,
     ) -> Options {
         Options {
             root,
@@ -31,10 +34,12 @@ impl Options {
             pattern,
             extension,
             line_count,
+            no_colours,
         }
     }
 }
 
+/// parses command line arguments using clap and returns an Option struct encapsulating those arguments.
 pub fn parse_args() -> Options {
     let matches = App::new("tre")
         .version("1.0")
@@ -55,7 +60,7 @@ pub fn parse_args() -> Options {
             Arg::with_name("all")
                 .short("a")
                 .long("all")
-                .help("All files are printed. By default tre  does  not  print  hidden files  (those  beginning  with a dot `.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
+                .help("All files are printed. By default tre does not print hidden files (those beginning with a dot '.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
                 .takes_value(false),
         ).arg(
             Arg::with_name("symbolic")
@@ -88,6 +93,12 @@ pub fn parse_args() -> Options {
                 .long("linecount")
                 .help("count and display lines of files.")
                 .takes_value(false),
+        ).arg(
+            Arg::with_name("nocolours")
+                .short("n")
+                .long("nocolours")
+                .help("output without colours.")
+                .takes_value(false),
         ).get_matches();
 
     let max_depth: Option<usize> = match matches.value_of("level") {
@@ -104,6 +115,7 @@ pub fn parse_args() -> Options {
         matches.value_of("pattern").map(|s| s.to_string()),
         matches.value_of("extension").map(|s| s.to_string()),
         matches.is_present("linecount"),
+        matches.is_present("nocolours"),
     )
 }
 

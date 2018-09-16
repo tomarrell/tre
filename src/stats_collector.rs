@@ -4,19 +4,23 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::Error as IOError;
 
+/// Enum expressing the possible file types returned by Walker
 pub enum FileType {
     Directory,
     File,
     Link,
 }
 
+/// Aggregate statistics for the traversed filesystem
 pub struct Stats {
     files: usize,
-    directories: usize,
+    directories: isize,
     links: usize,
     lines: Option<usize>,
 }
 
+/// StatCollector is responsible for aggregating statistics as the filesystem is traversed,
+/// as well as parsing a DirEntry's file type
 pub struct StatsCollector {
     stats: Stats,
 }
@@ -26,13 +30,14 @@ impl StatsCollector {
         StatsCollector {
             stats: Stats {
                 files: 0,
-                directories: 1,
+                directories: -1,
                 links: 0,
                 lines: None,
             },
         }
     }
 
+    /// Parse's and returns a file's type and update aggregate count statistics
     pub fn parse_and_collect(&mut self, entry: &DirEntry) -> Result<FileType, Error> {
         match entry.file_type() {
             Some(typ) if typ.is_dir() => {
@@ -50,15 +55,12 @@ impl StatsCollector {
         }
     }
 
+    /// Attempts to read contents of a file to count lines.
     pub fn count_lines(&mut self, entry: &DirEntry) -> Result<usize, IOError> {
         let mut f = File::open(entry.path())?;
         let mut s = String::new();
 
-        // TODO think of dealing with this case better
-        match f.read_to_string(&mut s) {
-            Ok(_) => (),
-            Err(_) => (),
-        };
+        f.read_to_string(&mut s)?;
 
         let line_count = s.lines().count();
         self.stats.lines = match self.stats.lines {
@@ -89,10 +91,20 @@ mod tests {
 
     #[test]
     fn print_stats() {
-        let stats = StatsCollector::new();
+        let mut stats = StatsCollector::new();
 
         assert_eq!(
-            "\nDirectories: 1, Files: 0, Symbolic Links: 0, Lines: 0",
+            "\nDirectories: -1, Files: 0, Symbolic Links: 0, Lines: 0",
+            format!("{}", stats)
+        );
+
+        stats.stats.directories = 10;
+        stats.stats.files = 10;
+        stats.stats.links = 10;
+        stats.stats.lines = Some(10);
+
+        assert_eq!(
+            "\nDirectories: 10, Files: 10, Symbolic Links: 10, Lines: 10",
             format!("{}", stats)
         );
     }
