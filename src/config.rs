@@ -60,7 +60,7 @@ pub fn parse_args() -> Options {
             Arg::with_name("all")
                 .short("a")
                 .long("all")
-                .help("All files are printed. By default tre  does  not  print  hidden files  (those  beginning  with a dot `.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
+                .help("All files are printed. By default tre does not print hidden files (those beginning with a dot '.').  In no event does tree print the file system constructs `.' (current directory) and `..' (previous directory).")
                 .takes_value(false),
         ).arg(
             Arg::with_name("symbolic")
