@@ -1,116 +1,67 @@
 use config::Options;
 use display;
 use ignore::{DirEntry, Error, Walk};
-use stats_collector::{FileType, StatsCollector};
+use std::path::PathBuf;
 use walker::build_shallow;
 
-/// Streamer represents the object traversing the filesystem, printing the structure and collecting stats.
-pub struct Streamer {
-    prev_depth: usize,
-    curr_depth: usize,
-    parent_depths: Vec<usize>,
-    curr_line_count: Option<usize>,
-    collector: StatsCollector,
-    dir_only: bool,
-    count_lines: bool,
-    colours: bool,
-    options: Options,
+pub fn stream_tree(opts: &Options, walker: &mut Walk, parent_vec: Vec<bool>) -> Result<(), Error> {
+    let mut dir_iter = walker.into_iter().filter_map(|e| e.ok()).peekable();
+
+    while let Some(dir) = dir_iter.next() {
+        match dir_iter.peek() {
+            Some(_) => switch_tree(&opts, dir, false, parent_vec.clone()),
+            None => switch_tree(&opts, dir, true, parent_vec.clone()),
+        }
+    }
+
+    Ok(())
 }
 
-impl Streamer {
-    pub fn new(opt: Options, collector: StatsCollector) -> Streamer {
-        Streamer {
-            prev_depth: 0,
-            curr_depth: 0,
-            parent_depths: vec![],
-            curr_line_count: None,
-            collector: collector,
-            dir_only: opt.dir_only,
-            count_lines: opt.line_count,
-            colours: !opt.no_colours,
-            options: opt,
-        }
-    }
+fn switch_tree(opts: &Options, entry: DirEntry, is_last: bool, mut parent_vec: Vec<bool>) {
+    match entry.file_type() {
+        // If the file is a directory
+        Some(f_type) if f_type.is_dir() => {
+            display::print_node(&entry, is_last, parent_vec.clone());
 
-    /// kicks off a recursive streaming of a directory file structure
-    pub fn stream_tree(&mut self, walker: &mut Walk) -> Result<(), Error> {
-        let mut prev = walker
-            .next()
-            .expect("could not get first element from walker")
-            .expect("could not get first element from walker");
-        self.prev_depth = prev.depth();
+            let root = opts.root.clone();
 
-        // walker traverses depth first, ignoring files/folders it can't parse or does not have permission to
-        for dir in walker.into_iter().filter_map(|e| e.ok()) {
-            self.curr_depth = dir.depth();
-            self.stream_node(&prev, false)?;
-            prev = dir;
-            self.prev_depth = self.curr_depth;
-        }
-
-        self.stream_node(&prev, true)?;
-
-        println!("{}", self.collector);
-        Ok(())
-    }
-
-    /// parse and stream an individual node, correctly printing its representation and updating statistics.
-    fn stream_node(&mut self, node: &DirEntry, is_last: bool) -> Result<(), Error> {
-        let mut is_last = is_last;
-        let file_name = node.file_name().to_owned().into_string().unwrap();
-
-        //parses current file type and tally stats
-        let file_type = self.collector.parse_and_collect(node)?;
-
-        // match on file type to do additional logic, such as skip directory or do line counting
-        match file_type {
-            FileType::File if self.dir_only => return Ok(()),
-            FileType::File if self.count_lines => {
-                // if failed to count lines (.e.g. no permission to read file) just pretend its 0
-                self.curr_line_count = Some(self.collector.count_lines(node).unwrap_or(0));
+            if root == PathBuf::from(entry.path()) {
+                return;
             }
-            _ => self.curr_line_count = None,
+
+            parent_vec.push(!is_last);
+
+            let new_path = entry.path();
+
+            let new_options = Options {
+                root: PathBuf::from(entry.path()),
+                max_depth: opts.max_depth,
+                follow_sym_links: opts.follow_sym_links,
+                show_hidden: opts.show_hidden,
+                dir_only: opts.dir_only,
+                pattern: opts.pattern.clone(),
+                extension: opts.extension.clone(),
+                line_count: opts.line_count,
+                no_colours: opts.no_colours,
+            };
+
+            let mut new_walk = build_shallow(&new_path, &new_options).unwrap();
+            let _ = stream_tree(&new_options, &mut new_walk, parent_vec.clone());
         }
 
-        let mut should_pop = false;
-        // This logic allows us to keep record parents (store in vec) of the current file.
-        // We are always traversing one file ahead of what we print, so we can tell whether the thing to print
-        // is the last of its parent directory (when the depth changes)
-        // additional we build a shallow walker that tries to figure out if the paren dir is the last dir,
-        // if so we pop it from the vec stack because we don't need to print that branch afterwards.
-        if self.prev_depth != self.curr_depth {
-            if self.prev_depth < self.curr_depth {
-                if let Some(parent_path) = node.path().parent() {
-                    let mut shallow_walker = build_shallow(parent_path, &self.options)?
-                        .into_iter()
-                        .filter_map(|e| e.ok())
-                        .skip_while(|n| n.path() != node.path())
-                        .skip(1);
-
-                    if let Some(_) = shallow_walker.next() {
-                        self.parent_depths.push(self.prev_depth);
-                    } else {
-                        is_last = true;
-                    }
-                }
-            } else {
-                should_pop = true;
-                is_last = true;
-            }
+        Some(f_type) if f_type.is_file() => {
+            display::print_node(&entry, is_last, parent_vec.clone());
         }
 
-        display::print(
-            file_name,
-            file_type,
-            self.prev_depth,
-            is_last,
-            &self.parent_depths,
-            self.curr_line_count,
-            self.colours,
-        );
-        if should_pop {
-            self.parent_depths.pop();
+        Some(f_type) if f_type.is_symlink() => {
+            display::print_node(&entry, is_last, parent_vec.clone());
         }
-        Ok(())
+
+        Some(_) => panic!("Invalid file type"),
+        None => panic!("Not a valid file"),
+    };
+
+    if is_last {
+        parent_vec.pop();
     }
 }

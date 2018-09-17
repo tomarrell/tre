@@ -1,11 +1,11 @@
 use config::Options;
 use ignore::types::TypesBuilder;
 use ignore::{Error, Walk, WalkBuilder};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Returns a Result for Walker based on options passed in.
 pub fn build(opt: &Options) -> Result<Walk, Error> {
-    let mut walker = WalkBuilder::new(opt.root.clone().unwrap_or(String::from(".")));
+    let mut walker = WalkBuilder::new(opt.root.to_str().unwrap_or("."));
     let mut builder = TypesBuilder::new();
 
     if let Some(ref pattern) = opt.pattern {
@@ -39,7 +39,7 @@ pub fn build_shallow(path: &Path, opt: &Options) -> Result<Walk, Error> {
         .to_string();
 
     let shallow_options = Options::new(
-        Some(path),
+        PathBuf::from(path),
         Some(1),
         false,
         opt.show_hidden,

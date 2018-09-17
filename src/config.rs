@@ -1,11 +1,12 @@
 use clap::{App, Arg};
+use std::path::PathBuf;
 
 /// Struct to hold command line arguments
 pub struct Options {
+    pub root: PathBuf,
     pub max_depth: Option<usize>,
     pub follow_sym_links: bool,
     pub show_hidden: bool,
-    pub root: Option<String>,
     pub dir_only: bool,
     pub pattern: Option<String>,
     pub extension: Option<String>,
@@ -15,7 +16,7 @@ pub struct Options {
 
 impl Options {
     pub fn new(
-        root: Option<String>,
+        root: PathBuf,
         max_depth: Option<usize>,
         follow_sym_links: bool,
         show_hidden: bool,
@@ -107,7 +108,10 @@ pub fn parse_args() -> Options {
     };
 
     Options::new(
-        matches.value_of("path").map(|s| s.to_string()),
+        matches
+            .value_of("path")
+            .map(|s| PathBuf::from(s.to_string()))
+            .unwrap_or(PathBuf::from(".")),
         max_depth,
         matches.is_present("symbolic"),
         matches.is_present("all"),
