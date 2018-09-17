@@ -1,0 +1,17 @@
+
+
+.
+├── Cargo.lock
+├── README.md
+├── target
+│   ├── streamer.rs
+│   ├── something
+│   │   ├── streamer.rs
+│   │   └── walker.rs
+│   │       └── someOtherFile.rs
+│   ├── else.rs
+│   └── walker.rs
+├── LICENSE-MIT
+└── src
+    ├── streamer.rs
+    └── walker.rs
