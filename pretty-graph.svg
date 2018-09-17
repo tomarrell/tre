@@ -1,0 +1,1778 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="518" onload="init(evt)" viewBox="0 0 1200 518" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs >
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	var details, searchbtn, matchedtxt, svg;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	// mouse-over for info
+	function s(node) {		// show
+		info = g_to_text(node);
+		details.nodeValue = "Function: " + info;
+	}
+	function c() {			// clear
+		details.nodeValue = ' ';
+	}
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	})
+
+	// functions
+	function find_child(parent, name, attr) {
+		var children = parent.childNodes;
+		for (var i=0; i<children.length;i++) {
+			if (children[i].tagName == name)
+				return (attr != undefined) ? children[i].attributes[attr].value : children[i];
+		}
+		return;
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_"+attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_"+attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_"+attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes["width"].value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes["x"].value = parseFloat(r.attributes["x"].value) +3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2*12*0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x=txt.length-2; x>0; x--) {
+			if (t.getSubStringLength(0, x+2) <= w) {
+				t.textContent = txt.substring(0,x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = (parseFloat(e.attributes["x"].value) - x - 10) * ratio + 10;
+				if(e.tagName == "text") e.attributes["x"].value = find_child(e.parentNode, "rect", "x") + 3;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseFloat(e.attributes["width"].value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_child(c[i], x-10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = 10;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseInt(svg.width.baseVal.value) - (10*2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr["width"].value);
+		var xmin = parseFloat(attr["x"].value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr["y"].value);
+		var ratio = (svg.width.baseVal.value - 2*10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "1.0";
+
+		var el = document.getElementsByTagName("g");
+		for(var i=0;i<el.length;i++){
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a["x"].value);
+			var ew = parseFloat(a["width"].value);
+			// Is it an ancestor
+			if (0 == 0) {
+				var upstack = parseFloat(a["y"].value) > ymin;
+			} else {
+				var upstack = parseFloat(a["y"].value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.style["opacity"] = "0.5";
+					zoom_parent(e);
+					e.onclick = function(e){unzoom(); zoom(this);};
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.style["display"] = "none";
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.style["display"] = "none";
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					e.onclick = function(e){zoom(this);};
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "0.0";
+
+		var el = document.getElementsByTagName("g");
+		for(i=0;i<el.length;i++) {
+			el[i].style["display"] = "block";
+			el[i].style["opacity"] = "1";
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.style["opacity"] = "0.1";
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.style["opacity"] = "0.0";
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementsByTagName("g");
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			if (e.attributes["class"].value != "func_g")
+				continue;
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (rect == null) {
+				// the rect might be wrapped in an anchor
+				// if nameattr href is being used
+				if (rect = find_child(e, "a")) {
+				    rect = find_child(r, "rect");
+				}
+			}
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes["width"].value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes["x"].value);
+				orig_save(rect, "fill");
+				rect.attributes["fill"].value =
+				    "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.style["opacity"] = "1.0";
+		searchbtn.firstChild.nodeValue = "Reset Search"
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.style["opacity"] = "1.0";
+		pct = 100 * count / maxwidth;
+		if (pct == 100)
+			pct = "100"
+		else
+			pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+	function searchover(e) {
+		searchbtn.style["opacity"] = "1.0";
+	}
+	function searchout(e) {
+		if (searching) {
+			searchbtn.style["opacity"] = "1.0";
+		} else {
+			searchbtn.style["opacity"] = "0.1";
+		}
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="518.0" fill="url(#background)"  />
+<text text-anchor="middle" x="600.00" y="24" font-size="17" font-family="Verdana" fill="rgb(0,0,0)"  >Flame Graph</text>
+<text text-anchor="" x="10.00" y="501" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="details" > </text>
+<text text-anchor="" x="10.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer" >Reset Zoom</text>
+<text text-anchor="" x="1090.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer" >Search</text>
+<text text-anchor="" x="1090.00" y="501" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="matched" > </text>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc_no_move (1 samples, 0.52%)</title><rect x="1097.3" y="133" width="6.2" height="15.0" fill="rgb(226,97,22)" rx="2" ry="2" />
+<text text-anchor="" x="1100.33" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..path..Components$LT$$u27$a$GT$$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h680f582684e83efb (1 samples, 0.52%)</title><rect x="133.6" y="245" width="6.1" height="15.0" fill="rgb(242,98,37)" rx="2" ry="2" />
+<text text-anchor="" x="136.56" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::display::dir_str::h3e60db6b8d3cd9ca (1 samples, 0.52%)</title><rect x="1017.0" y="293" width="6.2" height="15.0" fill="rgb(205,84,35)" rx="2" ry="2" />
+<text text-anchor="" x="1020.02" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSetBuilder::add::had44c2bad9c69675 (1 samples, 0.52%)</title><rect x="1085.0" y="197" width="6.2" height="15.0" fill="rgb(224,191,36)" rx="2" ry="2" />
+<text text-anchor="" x="1087.97" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_bytes::Regex::new::hcc36682cfe925dbc (1 samples, 0.52%)</title><rect x="1183.8" y="213" width="6.2" height="15.0" fill="rgb(241,30,52)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="1085.0" y="181" width="6.2" height="15.0" fill="rgb(223,212,47)" rx="2" ry="2" />
+<text text-anchor="" x="1087.97" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="269.5" y="181" width="6.2" height="15.0" fill="rgb(215,23,14)" rx="2" ry="2" />
+<text text-anchor="" x="272.48" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (2 samples, 1.05%)</title><rect x="825.5" y="165" width="12.4" height="15.0" fill="rgb(205,2,46)" rx="2" ry="2" />
+<text text-anchor="" x="828.50" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (2 samples, 1.05%)</title><rect x="1091.2" y="165" width="12.3" height="15.0" fill="rgb(215,21,5)" rx="2" ry="2" />
+<text text-anchor="" x="1094.15" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..AcAutomaton$LT$P$GT$$GT$::new::hec274712c50505ad (6 samples, 3.14%)</title><rect x="800.8" y="197" width="37.1" height="15.0" fill="rgb(247,24,47)" rx="2" ry="2" />
+<text text-anchor="" x="803.79" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::streamer::Streamer::stream_tree::h70734279ff297ba6 (184 samples, 96.34%)</title><rect x="40.9" y="325" width="1136.7" height="15.0" fill="rgb(229,128,48)" rx="2" ry="2" />
+<text text-anchor="" x="43.89" y="335.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`tre::streamer::Streamer::stream_tree::h70734279ff297ba6</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="34.7" y="261" width="6.2" height="15.0" fill="rgb(210,74,53)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add::hb35b4f04c4045400 (1 samples, 0.52%)</title><rect x="115.0" y="261" width="6.2" height="15.0" fill="rgb(228,44,36)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::fmt::write::h34603e2839700821 (2 samples, 1.05%)</title><rect x="1004.7" y="245" width="12.3" height="15.0" fill="rgb(234,76,24)" rx="2" ry="2" />
+<text text-anchor="" x="1007.66" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::ffi::os_str::OsStr::to_os_string::h2281fca410d5d1b6 (1 samples, 0.52%)</title><rect x="776.1" y="197" width="6.2" height="15.0" fill="rgb(254,199,48)" rx="2" ry="2" />
+<text text-anchor="" x="779.07" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`telldir$INODE64 (1 samples, 0.52%)</title><rect x="288.0" y="197" width="6.2" height="15.0" fill="rgb(230,158,29)" rx="2" ry="2" />
+<text text-anchor="" x="291.01" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..raw_vec..RawVec$LT$T$C$$u20$A$GT$$GT$::reserve_internal::h8f4d508c89dafe69 (1 samples, 0.52%)</title><rect x="510.4" y="213" width="6.2" height="15.0" fill="rgb(213,190,39)" rx="2" ry="2" />
+<text text-anchor="" x="513.42" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::io::append_to_string::h9f0115bcc4d14f9a (4 samples, 2.09%)</title><rect x="584.6" y="197" width="24.7" height="15.0" fill="rgb(221,158,8)" rx="2" ry="2" />
+<text text-anchor="" x="587.55" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..Dense$u20$as$u20$aho_corasick..Transitions$GT$::new::h6226ecbea42e8dc1 (2 samples, 1.05%)</title><rect x="825.5" y="181" width="12.4" height="15.0" fill="rgb(237,141,9)" rx="2" ry="2" />
+<text text-anchor="" x="828.50" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::set_bytes::RegexSetBuilder::build::h0b667416084acad6 (1 samples, 0.52%)</title><rect x="1134.4" y="181" width="6.2" height="15.0" fill="rgb(240,115,36)" rx="2" ry="2" />
+<text text-anchor="" x="1137.40" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="615.4" y="133" width="6.2" height="15.0" fill="rgb(217,83,40)" rx="2" ry="2" />
+<text text-anchor="" x="618.45" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::rt::lang_start::_$u7b$$u7b$closure$u7d$$u7d$::h18a33efd3baf0859 (189 samples, 98.95%)</title><rect x="22.4" y="357" width="1167.6" height="15.0" fill="rgb(205,101,52)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="367.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`std::rt::lang_start::_$u7b$$u7b$closure$u7d$$u7d$::h18a33efd3baf0859</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::exists::h5dcb5377034e955b (1 samples, 0.52%)</title><rect x="102.7" y="277" width="6.1" height="15.0" fill="rgb(208,211,33)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_tcache_fill_small (2 samples, 1.05%)</title><rect x="887.3" y="101" width="12.3" height="15.0" fill="rgb(245,117,13)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libdyld.dylib`tlv_get_addr (1 samples, 0.52%)</title><rect x="998.5" y="245" width="6.2" height="15.0" fill="rgb(206,36,7)" rx="2" ry="2" />
+<text text-anchor="" x="1001.48" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::PartialErrorBuilder::maybe_push_ignore_io::hce058a5e62deee7d (1 samples, 0.52%)</title><rect x="572.2" y="229" width="6.2" height="15.0" fill="rgb(245,146,22)" rx="2" ry="2" />
+<text text-anchor="" x="575.20" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::types::TypesBuilder::build::h9cf786bd302bab16 (1 samples, 0.52%)</title><rect x="1023.2" y="261" width="6.2" height="15.0" fill="rgb(220,224,31)" rx="2" ry="2" />
+<text text-anchor="" x="1026.19" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::create_gitignore::h7e4929ad98dfde95 (55 samples, 28.80%)</title><rect x="559.8" y="245" width="339.8" height="15.0" fill="rgb(244,92,21)" rx="2" ry="2" />
+<text text-anchor="" x="562.84" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir::create_gitignore::h7e4929ad9..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::validator::Validator::validate::h9fc29c67e4370af4 (1 samples, 0.52%)</title><rect x="28.5" y="261" width="6.2" height="15.0" fill="rgb(229,30,24)" rx="2" ry="2" />
+<text text-anchor="" x="31.53" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::Walk::skip_entry::hd536853e33247e4b (1 samples, 0.52%)</title><rect x="108.8" y="293" width="6.2" height="15.0" fill="rgb(234,6,3)" rx="2" ry="2" />
+<text text-anchor="" x="111.85" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::bytes::RegexBuilder::build::h70f89d2509b58e30 (1 samples, 0.52%)</title><rect x="504.2" y="197" width="6.2" height="15.0" fill="rgb(236,17,2)" rx="2" ry="2" />
+<text text-anchor="" x="507.24" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::IntoIter::handle_entry::h3227ea8c0cb7de73 (5 samples, 2.62%)</title><rect x="47.1" y="277" width="30.9" height="15.0" fill="rgb(220,136,31)" rx="2" ry="2" />
+<text text-anchor="" x="50.07" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::bytes::RegexBuilder::build::h70f89d2509b58e30 (1 samples, 0.52%)</title><rect x="1183.8" y="197" width="6.2" height="15.0" fill="rgb(213,61,37)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="627.8" y="149" width="6.2" height="15.0" fill="rgb(250,124,52)" rx="2" ry="2" />
+<text text-anchor="" x="630.80" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__open (8 samples, 4.19%)</title><rect x="423.9" y="181" width="49.5" height="15.0" fill="rgb(242,157,19)" rx="2" ry="2" />
+<text text-anchor="" x="426.93" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libs..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="1159.1" y="165" width="6.2" height="15.0" fill="rgb(239,181,37)" rx="2" ry="2" />
+<text text-anchor="" x="1162.11" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_set::bytes::RegexSet::matches::hedefdeb8701965e3 (2 samples, 1.05%)</title><rect x="961.4" y="197" width="12.4" height="15.0" fill="rgb(220,18,43)" rx="2" ry="2" />
+<text text-anchor="" x="964.41" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::iter::iterator::Iterator::eq::hd7374cd163a1a42c (1 samples, 0.52%)</title><rect x="133.6" y="261" width="6.1" height="15.0" fill="rgb(250,148,52)" rx="2" ry="2" />
+<text text-anchor="" x="136.56" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`0x2 (191 samples, 100.00%)</title><rect x="10.0" y="453" width="1180.0" height="15.0" fill="rgb(232,70,32)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="463.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`0x2</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_bin_malloc_hard (1 samples, 0.52%)</title><rect x="34.7" y="213" width="6.2" height="15.0" fill="rgb(230,16,32)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::panicking::try::do_call::h1121971afcb56fd2 (189 samples, 98.95%)</title><rect x="22.4" y="373" width="1167.6" height="15.0" fill="rgb(215,25,22)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="383.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`std::panicking::try::do_call::h1121971afcb56fd2</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$GT$::extend_with::h31772ced78a474fa (1 samples, 0.52%)</title><rect x="1183.8" y="149" width="6.2" height="15.0" fill="rgb(219,4,34)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::OpenOptions::_open::h8d1b766285386362 (8 samples, 4.19%)</title><rect x="423.9" y="229" width="49.5" height="15.0" fill="rgb(237,9,30)" rx="2" ry="2" />
+<text text-anchor="" x="426.93" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..sync..Arc$LT$T$GT$$GT$::drop_slow::hfa2b3a257cb50758 (2 samples, 1.05%)</title><rect x="152.1" y="213" width="12.4" height="15.0" fill="rgb(236,182,14)" rx="2" ry="2" />
+<text text-anchor="" x="155.09" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_palloc (2 samples, 1.05%)</title><rect x="887.3" y="133" width="12.3" height="15.0" fill="rgb(248,28,5)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..AcAutomaton$LT$P$C$$u20$T$GT$$GT$::build::h85ae09184fc9bf29 (4 samples, 2.09%)</title><rect x="800.8" y="181" width="24.7" height="15.0" fill="rgb(249,55,38)" rx="2" ry="2" />
+<text text-anchor="" x="803.79" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::walker::build_shallow::h2dcd3be382950d72 (25 samples, 13.09%)</title><rect x="1023.2" y="293" width="154.4" height="15.0" fill="rgb(225,121,12)" rx="2" ry="2" />
+<text text-anchor="" x="1026.19" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`tre::walker::bu..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="603.1" y="181" width="6.2" height="15.0" fill="rgb(223,9,15)" rx="2" ry="2" />
+<text text-anchor="" x="606.09" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::IntoIter::push::h3eb8cdf60ceb6d58 (5 samples, 2.62%)</title><rect x="47.1" y="261" width="30.9" height="15.0" fill="rgb(253,54,50)" rx="2" ry="2" />
+<text text-anchor="" x="50.07" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="102.7" y="213" width="6.1" height="15.0" fill="rgb(250,37,10)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSet::is_empty::h46925c450b449227 (1 samples, 0.52%)</title><rect x="108.8" y="245" width="6.2" height="15.0" fill="rgb(243,0,50)" rx="2" ry="2" />
+<text text-anchor="" x="111.85" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>all (191 samples, 100%)</title><rect x="10.0" y="469" width="1180.0" height="15.0" fill="rgb(224,138,32)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="479.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::create_gitignore::h7e4929ad98dfde95 (1 samples, 0.52%)</title><rect x="115.0" y="277" width="6.2" height="15.0" fill="rgb(214,226,28)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$thread_local..ThreadLocal$LT$T$GT$$u20$as$u20$core..default..Default$GT$::default::h55ee10e9603c2459 (1 samples, 0.52%)</title><rect x="1023.2" y="245" width="6.2" height="15.0" fill="rgb(216,58,4)" rx="2" ry="2" />
+<text text-anchor="" x="1026.19" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="881.1" y="149" width="6.2" height="15.0" fill="rgb(241,5,44)" rx="2" ry="2" />
+<text text-anchor="" x="884.10" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_run_split_small (1 samples, 0.52%)</title><rect x="34.7" y="197" width="6.2" height="15.0" fill="rgb(231,79,22)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..thread..local..LocalKey$LT$T$GT$$GT$::try_with::h636dcd1a395eeb88 (4 samples, 2.09%)</title><rect x="992.3" y="277" width="24.7" height="15.0" fill="rgb(238,209,1)" rx="2" ry="2" />
+<text text-anchor="" x="995.30" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::LiteralStrategy::matches_into::hfadd7708e09d7cef (1 samples, 0.52%)</title><rect x="955.2" y="197" width="6.2" height="15.0" fill="rgb(241,52,21)" rx="2" ry="2" />
+<text text-anchor="" x="958.24" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::cvt_r::h1a151f64f804b21e (1 samples, 0.52%)</title><rect x="769.9" y="165" width="6.2" height="15.0" fill="rgb(253,127,50)" rx="2" ry="2" />
+<text text-anchor="" x="772.90" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::IntoIter::push::h3eb8cdf60ceb6d58 (39 samples, 20.42%)</title><rect x="139.7" y="245" width="241.0" height="15.0" fill="rgb(214,151,33)" rx="2" ry="2" />
+<text text-anchor="" x="142.74" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`walkdir::IntoIter::push::h3e..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::collections::hash::map::RandomState::new::KEYS::__getit::h0bd260d2eadb2961 (1 samples, 0.52%)</title><rect x="967.6" y="133" width="6.2" height="15.0" fill="rgb(212,134,45)" rx="2" ry="2" />
+<text text-anchor="" x="970.59" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..sync..mutex..Mutex$LT$T$GT$$GT$::new::hca776ab0d11fd6c8 (1 samples, 0.52%)</title><rect x="16.2" y="389" width="6.2" height="15.0" fill="rgb(223,223,9)" rx="2" ry="2" />
+<text text-anchor="" x="19.18" y="399.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="695.8" y="117" width="6.1" height="15.0" fill="rgb(241,41,49)" rx="2" ry="2" />
+<text text-anchor="" x="698.76" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$GT$::extend_with::hc44dddf60171fa60 (1 samples, 0.52%)</title><rect x="794.6" y="197" width="6.2" height="15.0" fill="rgb(220,50,11)" rx="2" ry="2" />
+<text text-anchor="" x="797.61" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::io::stdio::_print::h0b0b98d2bbac2cd6 (4 samples, 2.09%)</title><rect x="992.3" y="293" width="24.7" height="15.0" fill="rgb(245,0,14)" rx="2" ry="2" />
+<text text-anchor="" x="995.30" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$GT$::extend_from_slice::h870202c45197b79b (2 samples, 1.05%)</title><rect x="621.6" y="165" width="12.4" height="15.0" fill="rgb(207,92,50)" rx="2" ry="2" />
+<text text-anchor="" x="624.62" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_bin_malloc_hard (1 samples, 0.52%)</title><rect x="491.9" y="165" width="6.2" height="15.0" fill="rgb(230,150,37)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..raw_vec..RawVec$LT$T$C$$u20$A$GT$$GT$::reserve_internal::h8f4d508c89dafe69 (1 samples, 0.52%)</title><rect x="1159.1" y="181" width="6.2" height="15.0" fill="rgb(221,22,21)" rx="2" ry="2" />
+<text text-anchor="" x="1162.11" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_tcache_fill_small (1 samples, 0.52%)</title><rect x="788.4" y="165" width="6.2" height="15.0" fill="rgb(225,21,42)" rx="2" ry="2" />
+<text text-anchor="" x="791.43" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..sys..unix..fs..ReadDir$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h992f12a11a36ab7c (1 samples, 0.52%)</title><rect x="53.2" y="213" width="6.2" height="15.0" fill="rgb(241,111,45)" rx="2" ry="2" />
+<text text-anchor="" x="56.25" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc_no_move (1 samples, 0.52%)</title><rect x="510.4" y="181" width="6.2" height="15.0" fill="rgb(239,56,6)" rx="2" ry="2" />
+<text text-anchor="" x="513.42" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::Parser::push_token::h8f39ec1eb25b5468 (1 samples, 0.52%)</title><rect x="615.4" y="181" width="6.2" height="15.0" fill="rgb(210,72,17)" rx="2" ry="2" />
+<text text-anchor="" x="618.45" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$$RF$$u27$a$u20$mut$u20$I$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h07da1914bacc40b6 (141 samples, 73.82%)</title><rect x="121.2" y="293" width="871.1" height="15.0" fill="rgb(243,19,0)" rx="2" ry="2" />
+<text text-anchor="" x="124.20" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT$$RF$$u27$a$u20$mut$u20$I$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h07da1914bacc40b6</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="1085.0" y="149" width="6.2" height="15.0" fill="rgb(217,42,5)" rx="2" ry="2" />
+<text text-anchor="" x="1087.97" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`__rde_alloc (2 samples, 1.05%)</title><rect x="1041.7" y="245" width="12.4" height="15.0" fill="rgb(218,66,31)" rx="2" ry="2" />
+<text text-anchor="" x="1044.73" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_bin_malloc_hard (1 samples, 0.52%)</title><rect x="1128.2" y="117" width="6.2" height="15.0" fill="rgb(221,228,14)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_unicode::escape::h0a65a3b5d01a3dd4 (1 samples, 0.52%)</title><rect x="115.0" y="181" width="6.2" height="15.0" fill="rgb(252,131,34)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::Tokens::tokens_to_regex::h8f9336f6231b453f (1 samples, 0.52%)</title><rect x="115.0" y="213" width="6.2" height="15.0" fill="rgb(215,126,40)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::WalkBuilder::build::hc9d4428fcde8677a (24 samples, 12.57%)</title><rect x="1029.4" y="261" width="148.2" height="15.0" fill="rgb(218,159,40)" rx="2" ry="2" />
+<text text-anchor="" x="1032.37" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::walk::..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_tcache_alloc_small_hard (1 samples, 0.52%)</title><rect x="34.7" y="245" width="6.2" height="15.0" fill="rgb(207,84,11)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_run_split_small (1 samples, 0.52%)</title><rect x="1128.2" y="101" width="6.2" height="15.0" fill="rgb(210,98,14)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::exists::h5dcb5377034e955b (5 samples, 2.62%)</title><rect x="522.8" y="261" width="30.9" height="15.0" fill="rgb(235,56,19)" rx="2" ry="2" />
+<text text-anchor="" x="525.77" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::IntoIter::handle_entry::h3227ea8c0cb7de73 (39 samples, 20.42%)</title><rect x="139.7" y="261" width="241.0" height="15.0" fill="rgb(237,81,15)" rx="2" ry="2" />
+<text text-anchor="" x="142.74" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`walkdir::IntoIter::handle_en..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::parse_excludes_file::hd30c338832e4f999 (1 samples, 0.52%)</title><rect x="1183.8" y="261" width="6.2" height="15.0" fill="rgb(241,221,28)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..clone..Clone$GT$::clone::hd69a36d0e43ed2ea (1 samples, 0.52%)</title><rect x="1109.7" y="165" width="6.2" height="15.0" fill="rgb(245,180,47)" rx="2" ry="2" />
+<text text-anchor="" x="1112.69" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_child_path::h075ebbc5683745d2 (1 samples, 0.52%)</title><rect x="115.0" y="293" width="6.2" height="15.0" fill="rgb(237,161,47)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::Tokens::tokens_to_regex::h8f9336f6231b453f (14 samples, 7.33%)</title><rect x="621.6" y="181" width="86.5" height="15.0" fill="rgb(216,195,22)" rx="2" ry="2" />
+<text text-anchor="" x="624.62" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`globse..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::skip_path::he258ab180049c681 (1 samples, 0.52%)</title><rect x="108.8" y="277" width="6.2" height="15.0" fill="rgb(212,226,27)" rx="2" ry="2" />
+<text text-anchor="" x="111.85" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="652.5" y="101" width="6.2" height="15.0" fill="rgb(230,27,11)" rx="2" ry="2" />
+<text text-anchor="" x="655.51" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::matched::hc5084e426724df52 (1 samples, 0.52%)</title><rect x="108.8" y="261" width="6.2" height="15.0" fill="rgb(233,112,44)" rx="2" ry="2" />
+<text text-anchor="" x="111.85" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::parser::Parser::get_matches_with::hfab4bc14709cdc4c (2 samples, 1.05%)</title><rect x="22.4" y="277" width="12.3" height="15.0" fill="rgb(221,4,20)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..collections..btree..map..BTreeMap$LT$K$C$$u20$V$GT$$GT$::entry::hc10fe0f14ab3b687 (2 samples, 1.05%)</title><rect x="856.4" y="197" width="12.3" height="15.0" fill="rgb(232,91,48)" rx="2" ry="2" />
+<text text-anchor="" x="859.39" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::GlobBuilder::build::h5efeca9c363b8ba1 (1 samples, 0.52%)</title><rect x="115.0" y="229" width="6.2" height="15.0" fill="rgb(219,45,51)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::WalkBuilder::build::hc9d4428fcde8677a (2 samples, 1.05%)</title><rect x="1177.6" y="309" width="12.4" height="15.0" fill="rgb(218,205,39)" rx="2" ry="2" />
+<text text-anchor="" x="1180.64" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..sync..Arc$LT$T$GT$$GT$::drop_slow::hc2aa174e7794496b (1 samples, 0.52%)</title><rect x="127.4" y="277" width="6.2" height="15.0" fill="rgb(207,36,30)" rx="2" ry="2" />
+<text text-anchor="" x="130.38" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..Lines$LT$B$GT$$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h75e7c2c393b6109c (1 samples, 0.52%)</title><rect x="1078.8" y="213" width="6.2" height="15.0" fill="rgb(209,110,6)" rx="2" ry="2" />
+<text text-anchor="" x="1081.80" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_tcache_fill_small (1 samples, 0.52%)</title><rect x="34.7" y="229" width="6.2" height="15.0" fill="rgb(230,226,12)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..path..Components$LT$$u27$a$GT$$u20$as$u20$core..iter..traits..DoubleEndedIterator$GT$::next_back::h2437e7c0e85d9625 (1 samples, 0.52%)</title><rect x="65.6" y="181" width="6.2" height="15.0" fill="rgb(243,122,28)" rx="2" ry="2" />
+<text text-anchor="" x="68.60" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..clone..Clone$GT$::clone::hc523a65ac99b18db (1 samples, 0.52%)</title><rect x="566.0" y="229" width="6.2" height="15.0" fill="rgb(232,95,49)" rx="2" ry="2" />
+<text text-anchor="" x="569.02" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::_join::h9b290bbe847a654b (1 samples, 0.52%)</title><rect x="510.4" y="245" width="6.2" height="15.0" fill="rgb(237,6,33)" rx="2" ry="2" />
+<text text-anchor="" x="513.42" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_child_path::h075ebbc5683745d2 (57 samples, 29.84%)</title><rect x="559.8" y="261" width="352.2" height="15.0" fill="rgb(208,76,23)" rx="2" ry="2" />
+<text text-anchor="" x="562.84" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir::Ignore::add_child_path::h075eb..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$thread_local..ThreadLocal$LT$T$GT$$u20$as$u20$core..default..Default$GT$::default::h55ee10e9603c2459 (1 samples, 0.52%)</title><rect x="491.9" y="229" width="6.2" height="15.0" fill="rgb(220,49,34)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..fs..File$u20$as$u20$std..io..Read$GT$::read::h54ae13ad60d9bce9 (1 samples, 0.52%)</title><rect x="596.9" y="181" width="6.2" height="15.0" fill="rgb(215,127,18)" rx="2" ry="2" />
+<text text-anchor="" x="599.91" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__mmap (1 samples, 0.52%)</title><rect x="491.9" y="117" width="6.2" height="15.0" fill="rgb(220,144,20)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="59.4" y="165" width="6.2" height="15.0" fill="rgb(226,58,38)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sync::once::Once::call_inner::he70c1f48f334918c (1 samples, 0.52%)</title><rect x="1183.8" y="245" width="6.2" height="15.0" fill="rgb(224,227,25)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="1023.2" y="229" width="6.2" height="15.0" fill="rgb(241,46,38)" rx="2" ry="2" />
+<text text-anchor="" x="1026.19" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::DirEntry::from_entry::hbb8ddd15d9d67c04 (1 samples, 0.52%)</title><rect x="59.4" y="229" width="6.2" height="15.0" fill="rgb(209,8,17)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open_c::h899aba720c5bee3d (9 samples, 4.71%)</title><rect x="720.5" y="181" width="55.6" height="15.0" fill="rgb(216,145,16)" rx="2" ry="2" />
+<text text-anchor="" x="723.47" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`s..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (2 samples, 1.05%)</title><rect x="473.4" y="181" width="12.3" height="15.0" fill="rgb(244,120,44)" rx="2" ry="2" />
+<text text-anchor="" x="476.35" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::OpenOptions::_open::h8d1b766285386362 (1 samples, 0.52%)</title><rect x="1152.9" y="213" width="6.2" height="15.0" fill="rgb(229,3,47)" rx="2" ry="2" />
+<text text-anchor="" x="1155.93" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add_line::h9babffd03a5062a7 (4 samples, 2.09%)</title><rect x="1085.0" y="213" width="24.7" height="15.0" fill="rgb(239,52,19)" rx="2" ry="2" />
+<text text-anchor="" x="1087.97" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="615.4" y="165" width="6.2" height="15.0" fill="rgb(222,137,20)" rx="2" ry="2" />
+<text text-anchor="" x="618.45" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc_no_move (1 samples, 0.52%)</title><rect x="102.7" y="181" width="6.1" height="15.0" fill="rgb(214,120,46)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="776.1" y="165" width="6.2" height="15.0" fill="rgb(232,198,27)" rx="2" ry="2" />
+<text text-anchor="" x="779.07" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::is_dir::h07cf07651193dd9c (1 samples, 0.52%)</title><rect x="986.1" y="277" width="6.2" height="15.0" fill="rgb(218,28,6)" rx="2" ry="2" />
+<text text-anchor="" x="989.13" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_sdallocx (4 samples, 2.09%)</title><rect x="671.0" y="149" width="24.8" height="15.0" fill="rgb(250,86,33)" rx="2" ry="2" />
+<text text-anchor="" x="674.05" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`readdir_r$INODE64 (17 samples, 8.90%)</title><rect x="164.5" y="181" width="105.0" height="15.0" fill="rgb(236,229,10)" rx="2" ry="2" />
+<text text-anchor="" x="167.45" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libsystem_c...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::is_file::hf2a55cb5483b186f (2 samples, 1.05%)</title><rect x="1029.4" y="213" width="12.3" height="15.0" fill="rgb(227,94,13)" rx="2" ry="2" />
+<text text-anchor="" x="1032.37" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::PathBuf::_push::h2dae22f1228436c4 (1 samples, 0.52%)</title><rect x="59.4" y="197" width="6.2" height="15.0" fill="rgb(232,17,39)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`__opendir_common (4 samples, 2.09%)</title><rect x="281.8" y="213" width="24.7" height="15.0" fill="rgb(226,204,35)" rx="2" ry="2" />
+<text text-anchor="" x="284.83" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::str::run_utf8_validation::h2d720abc549a5fa6 (1 samples, 0.52%)</title><rect x="1078.8" y="165" width="6.2" height="15.0" fill="rgb(217,211,23)" rx="2" ry="2" />
+<text text-anchor="" x="1081.80" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::exec::ExecBuilder::build::h69c0436e582cf51b (1 samples, 0.52%)</title><rect x="1183.8" y="181" width="6.2" height="15.0" fill="rgb(244,30,3)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$core..fmt..Write..write_fmt..Adapter$LT$$u27$a$C$$u20$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_char::h662b6382f7814cb5 (2 samples, 1.05%)</title><rect x="646.3" y="133" width="12.4" height="15.0" fill="rgb(254,213,12)" rx="2" ry="2" />
+<text text-anchor="" x="649.34" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..SpecExtend$LT$T$C$$u20$I$GT$$GT$::from_iter::h4ff0dbd5606145bd (3 samples, 1.57%)</title><rect x="47.1" y="245" width="18.5" height="15.0" fill="rgb(220,175,14)" rx="2" ry="2" />
+<text text-anchor="" x="50.07" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (1 samples, 0.52%)</title><rect x="615.4" y="149" width="6.2" height="15.0" fill="rgb(242,69,24)" rx="2" ry="2" />
+<text text-anchor="" x="618.45" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`cerror_nocancel (1 samples, 0.52%)</title><rect x="769.9" y="149" width="6.2" height="15.0" fill="rgb(210,71,1)" rx="2" ry="2" />
+<text text-anchor="" x="772.90" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::ptr::drop_in_place::hf4c76ca0f50b8076 (1 samples, 0.52%)</title><rect x="393.0" y="245" width="6.2" height="15.0" fill="rgb(239,166,10)" rx="2" ry="2" />
+<text text-anchor="" x="396.04" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_child_path::h075ebbc5683745d2 (28 samples, 14.66%)</title><rect x="380.7" y="277" width="173.0" height="15.0" fill="rgb(232,66,32)" rx="2" ry="2" />
+<text text-anchor="" x="383.68" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir::Ignor..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::is_file::hf2a55cb5483b186f (2 samples, 1.05%)</title><rect x="1165.3" y="213" width="12.3" height="15.0" fill="rgb(213,93,41)" rx="2" ry="2" />
+<text text-anchor="" x="1168.29" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_pages_commit (2 samples, 1.05%)</title><rect x="887.3" y="53" width="12.3" height="15.0" fill="rgb(246,40,21)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::_join::h9b290bbe847a654b (1 samples, 0.52%)</title><rect x="1159.1" y="213" width="6.2" height="15.0" fill="rgb(233,79,50)" rx="2" ry="2" />
+<text text-anchor="" x="1162.11" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::fmt::write::h34603e2839700821 (2 samples, 1.05%)</title><rect x="646.3" y="149" width="12.4" height="15.0" fill="rgb(225,25,36)" rx="2" ry="2" />
+<text text-anchor="" x="649.34" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_calloc (1 samples, 0.52%)</title><rect x="1128.2" y="165" width="6.2" height="15.0" fill="rgb(219,100,10)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::ffi::os_str::OsStr::to_os_string::h2281fca410d5d1b6 (1 samples, 0.52%)</title><rect x="516.6" y="229" width="6.2" height="15.0" fill="rgb(207,93,19)" rx="2" ry="2" />
+<text text-anchor="" x="519.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex_syntax::escape::ha8a9b2824ec61815 (1 samples, 0.52%)</title><rect x="115.0" y="165" width="6.2" height="15.0" fill="rgb(236,145,33)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`closedir (1 samples, 0.52%)</title><rect x="158.3" y="197" width="6.2" height="15.0" fill="rgb(222,55,25)" rx="2" ry="2" />
+<text text-anchor="" x="161.27" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open_c::h899aba720c5bee3d (3 samples, 1.57%)</title><rect x="84.1" y="213" width="18.6" height="15.0" fill="rgb(249,176,46)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::OpenOptions::_open::h8d1b766285386362 (9 samples, 4.71%)</title><rect x="720.5" y="213" width="55.6" height="15.0" fill="rgb(248,164,32)" rx="2" ry="2" />
+<text text-anchor="" x="723.47" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`s..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::ffi::os_str::OsStr::to_os_string::h2281fca410d5d1b6 (2 samples, 1.05%)</title><rect x="473.4" y="213" width="12.3" height="15.0" fill="rgb(230,171,10)" rx="2" ry="2" />
+<text text-anchor="" x="476.35" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::slice::_$LT$impl$u20$$u5b$T$u5d$$GT$::copy_from_slice::h8727c881c68c6824 (2 samples, 1.05%)</title><rect x="473.4" y="197" width="12.3" height="15.0" fill="rgb(248,213,7)" rx="2" ry="2" />
+<text text-anchor="" x="476.35" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_pthread.dylib`pthread_getspecific (1 samples, 0.52%)</title><rect x="640.2" y="149" width="6.1" height="15.0" fill="rgb(236,226,21)" rx="2" ry="2" />
+<text text-anchor="" x="643.16" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_calloc (2 samples, 1.05%)</title><rect x="844.0" y="181" width="12.4" height="15.0" fill="rgb(237,154,24)" rx="2" ry="2" />
+<text text-anchor="" x="847.03" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSetBuilder::build::h8d1dbf6f18e8f054 (2 samples, 1.05%)</title><rect x="498.1" y="229" width="12.3" height="15.0" fill="rgb(205,209,22)" rx="2" ry="2" />
+<text text-anchor="" x="501.06" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (1 samples, 0.52%)</title><rect x="59.4" y="149" width="6.2" height="15.0" fill="rgb(223,183,12)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`alloc::slice::insert_head::he4a3897b2203d821 (2 samples, 1.05%)</title><rect x="65.6" y="229" width="12.4" height="15.0" fill="rgb(208,208,8)" rx="2" ry="2" />
+<text text-anchor="" x="68.60" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::Tokens::tokens_to_regex::h8f9336f6231b453f (1 samples, 0.52%)</title><rect x="1103.5" y="181" width="6.2" height="15.0" fill="rgb(242,89,28)" rx="2" ry="2" />
+<text text-anchor="" x="1106.51" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (1 samples, 0.52%)</title><rect x="1085.0" y="165" width="6.2" height="15.0" fill="rgb(213,9,48)" rx="2" ry="2" />
+<text text-anchor="" x="1087.97" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$walkdir..IntoIter$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h05d4918f100ede6a (5 samples, 2.62%)</title><rect x="47.1" y="293" width="30.9" height="15.0" fill="rgb(235,49,42)" rx="2" ry="2" />
+<text text-anchor="" x="50.07" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::build::h6d704e627ee34657 (4 samples, 2.09%)</title><rect x="485.7" y="245" width="24.7" height="15.0" fill="rgb(213,75,25)" rx="2" ry="2" />
+<text text-anchor="" x="488.71" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..fs..ReadDir$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h4743abcb7ddfe39c (18 samples, 9.42%)</title><rect x="164.5" y="213" width="111.2" height="15.0" fill="rgb(249,59,37)" rx="2" ry="2" />
+<text text-anchor="" x="167.45" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT$std...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`stat$INODE64 (1 samples, 0.52%)</title><rect x="986.1" y="261" width="6.2" height="15.0" fill="rgb(213,165,7)" rx="2" ry="2" />
+<text text-anchor="" x="989.13" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__mmap (1 samples, 0.52%)</title><rect x="1128.2" y="69" width="6.2" height="15.0" fill="rgb(210,5,18)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::Gitignore::global::he88941967aee926a (1 samples, 0.52%)</title><rect x="1183.8" y="277" width="6.2" height="15.0" fill="rgb(215,58,26)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`isfree (3 samples, 1.57%)</title><rect x="677.2" y="133" width="18.6" height="15.0" fill="rgb(226,30,16)" rx="2" ry="2" />
+<text text-anchor="" x="680.23" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`stat$INODE64 (2 samples, 1.05%)</title><rect x="1165.3" y="197" width="12.3" height="15.0" fill="rgb(206,155,5)" rx="2" ry="2" />
+<text text-anchor="" x="1168.29" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_tcache_alloc_small_hard (1 samples, 0.52%)</title><rect x="1128.2" y="149" width="6.2" height="15.0" fill="rgb(224,70,12)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_pages_commit (1 samples, 0.52%)</title><rect x="34.7" y="181" width="6.2" height="15.0" fill="rgb(231,10,2)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$core..option..Option$LT$$RF$$u27$a$u20$T$GT$$GT$::cloned::h64b371c91cbf2d84 (1 samples, 0.52%)</title><rect x="1109.7" y="181" width="6.2" height="15.0" fill="rgb(234,161,17)" rx="2" ry="2" />
+<text text-anchor="" x="1112.69" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::set_bytes::RegexSetBuilder::build::h0b667416084acad6 (3 samples, 1.57%)</title><rect x="881.1" y="197" width="18.5" height="15.0" fill="rgb(214,158,30)" rx="2" ry="2" />
+<text text-anchor="" x="884.10" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open_c::h899aba720c5bee3d (8 samples, 4.19%)</title><rect x="423.9" y="197" width="49.5" height="15.0" fill="rgb(217,131,37)" rx="2" ry="2" />
+<text text-anchor="" x="426.93" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::to_path_buf::hdb9866edfd6bca3f (1 samples, 0.52%)</title><rect x="776.1" y="213" width="6.2" height="15.0" fill="rgb(213,110,25)" rx="2" ry="2" />
+<text text-anchor="" x="779.07" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::skip_path::he258ab180049c681 (8 samples, 4.19%)</title><rect x="930.5" y="261" width="49.4" height="15.0" fill="rgb(252,110,23)" rx="2" ry="2" />
+<text text-anchor="" x="933.52" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::exists::h5dcb5377034e955b (2 samples, 1.05%)</title><rect x="899.6" y="245" width="12.4" height="15.0" fill="rgb(249,51,51)" rx="2" ry="2" />
+<text text-anchor="" x="902.63" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::App::get_matches_from_safe_borrow::h66c829b0cddc01b0 (2 samples, 1.05%)</title><rect x="22.4" y="293" width="12.3" height="15.0" fill="rgb(241,162,32)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add_line::h9babffd03a5062a7 (18 samples, 9.42%)</title><rect x="609.3" y="213" width="111.2" height="15.0" fill="rgb(208,168,44)" rx="2" ry="2" />
+<text text-anchor="" x="612.27" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::g..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="794.6" y="181" width="6.2" height="15.0" fill="rgb(234,138,30)" rx="2" ry="2" />
+<text text-anchor="" x="797.61" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..raw_vec..RawVec$LT$T$C$$u20$A$GT$$GT$::reserve_internal::h8f4d508c89dafe69 (1 samples, 0.52%)</title><rect x="102.7" y="229" width="6.1" height="15.0" fill="rgb(254,68,5)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::set_bytes::RegexSetBuilder::build::h0b667416084acad6 (1 samples, 0.52%)</title><rect x="504.2" y="213" width="6.2" height="15.0" fill="rgb(236,46,25)" rx="2" ry="2" />
+<text text-anchor="" x="507.24" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_sdallocx (1 samples, 0.52%)</title><rect x="1152.9" y="181" width="6.2" height="15.0" fill="rgb(241,224,3)" rx="2" ry="2" />
+<text text-anchor="" x="1155.93" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::config::parse_args::hf19340d6eeb32817 (3 samples, 1.57%)</title><rect x="22.4" y="325" width="18.5" height="15.0" fill="rgb(225,4,38)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="335.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::DirEntry::path::h887b56a8c2529636 (1 samples, 0.52%)</title><rect x="59.4" y="213" width="6.2" height="15.0" fill="rgb(239,24,1)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::validator::Validator::validate_required::hefbdae95720d4e91 (1 samples, 0.52%)</title><rect x="28.5" y="245" width="6.2" height="15.0" fill="rgb(228,201,23)" rx="2" ry="2" />
+<text text-anchor="" x="31.53" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..Dense$u20$as$u20$aho_corasick..Transitions$GT$::set_goto::h74f29b7d85a736b1 (1 samples, 0.52%)</title><rect x="819.3" y="165" width="6.2" height="15.0" fill="rgb(236,114,25)" rx="2" ry="2" />
+<text text-anchor="" x="822.32" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$thread_local..ThreadLocal$LT$T$GT$$u20$as$u20$core..default..Default$GT$::default::h55ee10e9603c2459 (1 samples, 0.52%)</title><rect x="794.6" y="213" width="6.2" height="15.0" fill="rgb(212,144,1)" rx="2" ry="2" />
+<text text-anchor="" x="797.61" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..State$LT$T$GT$$GT$::for_each_transition::hda7c7cc3d5443600 (1 samples, 0.52%)</title><rect x="1122.0" y="165" width="6.2" height="15.0" fill="rgb(223,10,3)" rx="2" ry="2" />
+<text text-anchor="" x="1125.04" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::Parser::push_token::h8f39ec1eb25b5468 (2 samples, 1.05%)</title><rect x="1091.2" y="181" width="12.3" height="15.0" fill="rgb(244,201,41)" rx="2" ry="2" />
+<text text-anchor="" x="1094.15" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..SpecExtend$LT$T$C$$u20$I$GT$$GT$::spec_extend::h1cd8e19511efcacb (1 samples, 0.52%)</title><rect x="34.7" y="277" width="6.2" height="15.0" fill="rgb(247,204,24)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="782.3" y="181" width="6.1" height="15.0" fill="rgb(250,72,27)" rx="2" ry="2" />
+<text text-anchor="" x="785.25" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::ops::function::impls::_$LT$impl$u20$core..ops..function..FnOnce$LT$A$GT$$u20$for$u20$$RF$$u27$a$u20$mut$u20$F$GT$::call_once::h1150b6cd4ddc3570 (2 samples, 1.05%)</title><rect x="1029.4" y="229" width="12.3" height="15.0" fill="rgb(228,59,10)" rx="2" ry="2" />
+<text text-anchor="" x="1032.37" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::IgnoreBuilder::build::hb10533aaa1491968 (2 samples, 1.05%)</title><rect x="1177.6" y="293" width="12.4" height="15.0" fill="rgb(244,60,0)" rx="2" ry="2" />
+<text text-anchor="" x="1180.64" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..State$LT$T$GT$$GT$::for_each_transition::hda7c7cc3d5443600 (1 samples, 0.52%)</title><rect x="837.9" y="181" width="6.1" height="15.0" fill="rgb(205,95,9)" rx="2" ry="2" />
+<text text-anchor="" x="840.85" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..Dense$u20$as$u20$aho_corasick..Transitions$GT$::set_goto::h74f29b7d85a736b1 (1 samples, 0.52%)</title><rect x="1115.9" y="149" width="6.1" height="15.0" fill="rgb(251,35,35)" rx="2" ry="2" />
+<text text-anchor="" x="1118.86" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="491.9" y="213" width="6.2" height="15.0" fill="rgb(220,146,29)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__close_nocancel (1 samples, 0.52%)</title><rect x="559.8" y="229" width="6.2" height="15.0" fill="rgb(244,36,42)" rx="2" ry="2" />
+<text text-anchor="" x="562.84" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_sdallocx (1 samples, 0.52%)</title><rect x="708.1" y="181" width="6.2" height="15.0" fill="rgb(213,136,32)" rx="2" ry="2" />
+<text text-anchor="" x="711.12" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`stat$INODE64 (2 samples, 1.05%)</title><rect x="899.6" y="229" width="12.4" height="15.0" fill="rgb(227,0,51)" rx="2" ry="2" />
+<text text-anchor="" x="902.63" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::File::open::h1e41fe1fe0d2950a (2 samples, 1.05%)</title><rect x="1140.6" y="213" width="12.3" height="15.0" fill="rgb(249,20,36)" rx="2" ry="2" />
+<text text-anchor="" x="1143.58" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memcmp (1 samples, 0.52%)</title><rect x="862.6" y="165" width="6.1" height="15.0" fill="rgb(253,10,22)" rx="2" ry="2" />
+<text text-anchor="" x="865.57" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_pthread.dylib`_pthread_mutex_check_init_slow (1 samples, 0.52%)</title><rect x="288.0" y="165" width="6.2" height="15.0" fill="rgb(225,114,54)" rx="2" ry="2" />
+<text text-anchor="" x="291.01" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::PathBuf::_push::h2dae22f1228436c4 (1 samples, 0.52%)</title><rect x="510.4" y="229" width="6.2" height="15.0" fill="rgb(236,98,47)" rx="2" ry="2" />
+<text text-anchor="" x="513.42" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::to_path_buf::hdb9866edfd6bca3f (1 samples, 0.52%)</title><rect x="516.6" y="245" width="6.2" height="15.0" fill="rgb(231,198,38)" rx="2" ry="2" />
+<text text-anchor="" x="519.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::Walk::skip_entry::hd536853e33247e4b (8 samples, 4.19%)</title><rect x="930.5" y="277" width="49.4" height="15.0" fill="rgb(242,207,13)" rx="2" ry="2" />
+<text text-anchor="" x="933.52" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memchr$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="949.1" y="181" width="6.1" height="15.0" fill="rgb(248,10,4)" rx="2" ry="2" />
+<text text-anchor="" x="952.06" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::io::Write::write_all::h3896e3333b544527 (2 samples, 1.05%)</title><rect x="1004.7" y="213" width="12.3" height="15.0" fill="rgb(235,126,44)" rx="2" ry="2" />
+<text text-anchor="" x="1007.66" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::io::append_to_string::h9f0115bcc4d14f9a (3 samples, 1.57%)</title><rect x="405.4" y="213" width="18.5" height="15.0" fill="rgb(234,224,2)" rx="2" ry="2" />
+<text text-anchor="" x="408.39" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="979.9" y="277" width="6.2" height="15.0" fill="rgb(207,165,53)" rx="2" ry="2" />
+<text text-anchor="" x="982.95" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSetBuilder::build::h8d1dbf6f18e8f054 (16 samples, 8.38%)</title><rect x="800.8" y="213" width="98.8" height="15.0" fill="rgb(235,221,2)" rx="2" ry="2" />
+<text text-anchor="" x="803.79" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`globset..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`alloc::collections::btree::search::search_tree::hbc7f2089697ed7bd (1 samples, 0.52%)</title><rect x="862.6" y="181" width="6.1" height="15.0" fill="rgb(250,148,29)" rx="2" ry="2" />
+<text text-anchor="" x="865.57" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_bzero$VARIANT$Haswell (2 samples, 1.05%)</title><rect x="844.0" y="165" width="12.4" height="15.0" fill="rgb(253,14,53)" rx="2" ry="2" />
+<text text-anchor="" x="847.03" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..Write..write_fmt..Adaptor$LT$$u27$a$C$$u20$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::hab46ad9e7afe0c00 (2 samples, 1.05%)</title><rect x="1004.7" y="229" width="12.3" height="15.0" fill="rgb(220,186,52)" rx="2" ry="2" />
+<text text-anchor="" x="1007.66" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::PartialErrorBuilder::maybe_push_ignore_io::hce058a5e62deee7d (1 samples, 0.52%)</title><rect x="399.2" y="245" width="6.2" height="15.0" fill="rgb(220,157,39)" rx="2" ry="2" />
+<text text-anchor="" x="402.21" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add::hb35b4f04c4045400 (13 samples, 6.81%)</title><rect x="405.4" y="245" width="80.3" height="15.0" fill="rgb(243,159,30)" rx="2" ry="2" />
+<text text-anchor="" x="408.39" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignor..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open::h86b90bcfd526d2af (9 samples, 4.71%)</title><rect x="720.5" y="197" width="55.6" height="15.0" fill="rgb(223,219,46)" rx="2" ry="2" />
+<text text-anchor="" x="723.47" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`s..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_pthread.dylib`_pthread_mutex_lock_slow (1 samples, 0.52%)</title><rect x="992.3" y="261" width="6.2" height="15.0" fill="rgb(226,63,53)" rx="2" ry="2" />
+<text text-anchor="" x="995.30" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_pages_commit (1 samples, 0.52%)</title><rect x="491.9" y="133" width="6.2" height="15.0" fill="rgb(226,5,48)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__open (8 samples, 4.19%)</title><rect x="720.5" y="165" width="49.4" height="15.0" fill="rgb(222,180,50)" rx="2" ry="2" />
+<text text-anchor="" x="723.47" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libs..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..clone..Clone$GT$::clone::hc523a65ac99b18db (1 samples, 0.52%)</title><rect x="1109.7" y="197" width="6.2" height="15.0" fill="rgb(222,22,32)" rx="2" ry="2" />
+<text text-anchor="" x="1112.69" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::char_to_escaped_literal::ha8a274c5f807085e (1 samples, 0.52%)</title><rect x="1103.5" y="165" width="6.2" height="15.0" fill="rgb(229,20,48)" rx="2" ry="2" />
+<text text-anchor="" x="1106.51" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_sdallocx (1 samples, 0.52%)</title><rect x="547.5" y="229" width="6.2" height="15.0" fill="rgb(205,99,20)" rx="2" ry="2" />
+<text text-anchor="" x="550.49" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="1091.2" y="133" width="6.1" height="15.0" fill="rgb(232,59,1)" rx="2" ry="2" />
+<text text-anchor="" x="1094.15" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::canonicalize::hd0a6a3808dab066d (3 samples, 1.57%)</title><rect x="912.0" y="245" width="18.5" height="15.0" fill="rgb(249,140,26)" rx="2" ry="2" />
+<text text-anchor="" x="914.99" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open::h86b90bcfd526d2af (3 samples, 1.57%)</title><rect x="84.1" y="229" width="18.6" height="15.0" fill="rgb(250,184,18)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_pthread.dylib`_pthread_mutex_lock_slow (1 samples, 0.52%)</title><rect x="288.0" y="181" width="6.2" height="15.0" fill="rgb(220,197,54)" rx="2" ry="2" />
+<text text-anchor="" x="291.01" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (1 samples, 0.52%)</title><rect x="102.7" y="197" width="6.1" height="15.0" fill="rgb(243,107,41)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$core..clone..Clone$GT$::clone::hc523a65ac99b18db (2 samples, 1.05%)</title><rect x="782.3" y="213" width="12.3" height="15.0" fill="rgb(213,149,20)" rx="2" ry="2" />
+<text text-anchor="" x="785.25" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::slice::_$LT$impl$u20$$u5b$T$u5d$$GT$::copy_from_slice::h8727c881c68c6824 (1 samples, 0.52%)</title><rect x="516.6" y="213" width="6.2" height="15.0" fill="rgb(219,112,51)" rx="2" ry="2" />
+<text text-anchor="" x="519.60" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add_line::h9babffd03a5062a7 (1 samples, 0.52%)</title><rect x="115.0" y="245" width="6.2" height="15.0" fill="rgb(221,132,13)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`stat$INODE64 (3 samples, 1.57%)</title><rect x="522.8" y="245" width="18.5" height="15.0" fill="rgb(219,95,45)" rx="2" ry="2" />
+<text text-anchor="" x="525.77" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_pages_commit (1 samples, 0.52%)</title><rect x="1128.2" y="85" width="6.2" height="15.0" fill="rgb(253,108,9)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="498.1" y="197" width="6.1" height="15.0" fill="rgb(247,103,4)" rx="2" ry="2" />
+<text text-anchor="" x="501.06" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..SpecExtend$LT$T$C$$u20$I$GT$$GT$::from_iter::h4ff0dbd5606145bd (22 samples, 11.52%)</title><rect x="139.7" y="229" width="136.0" height="15.0" fill="rgb(216,229,20)" rx="2" ry="2" />
+<text text-anchor="" x="142.74" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT$alloc..v..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="275.7" y="229" width="6.1" height="15.0" fill="rgb(239,122,20)" rx="2" ry="2" />
+<text text-anchor="" x="278.65" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..Lines$LT$B$GT$$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h75e7c2c393b6109c (3 samples, 1.57%)</title><rect x="405.4" y="229" width="18.5" height="15.0" fill="rgb(221,120,19)" rx="2" ry="2" />
+<text text-anchor="" x="408.39" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libdyld.dylib`start (191 samples, 100.00%)</title><rect x="10.0" y="437" width="1180.0" height="15.0" fill="rgb(205,18,45)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="447.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libdyld.dylib`start</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::build::h6d704e627ee34657 (19 samples, 9.95%)</title><rect x="782.3" y="229" width="117.3" height="15.0" fill="rgb(242,119,27)" rx="2" ry="2" />
+<text text-anchor="" x="785.25" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::gi..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::ffi::os_str::OsStr::bytes::h2f36cbb0d6928387 (1 samples, 0.52%)</title><rect x="942.9" y="181" width="6.2" height="15.0" fill="rgb(215,48,49)" rx="2" ry="2" />
+<text text-anchor="" x="945.88" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::ptr::drop_in_place::hcf5c54b044a374bf (1 samples, 0.52%)</title><rect x="399.2" y="229" width="6.2" height="15.0" fill="rgb(240,33,49)" rx="2" ry="2" />
+<text text-anchor="" x="402.21" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`__rust_maybe_catch_panic (189 samples, 98.95%)</title><rect x="22.4" y="389" width="1167.6" height="15.0" fill="rgb(206,58,24)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="399.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`__rust_maybe_catch_panic</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$thread_local..CachedThreadLocal$LT$T$GT$$GT$::new::h014c8a95de416ca8 (1 samples, 0.52%)</title><rect x="1183.8" y="165" width="6.2" height="15.0" fill="rgb(231,12,20)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`read (3 samples, 1.57%)</title><rect x="405.4" y="197" width="18.5" height="15.0" fill="rgb(228,90,27)" rx="2" ry="2" />
+<text text-anchor="" x="408.39" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::Gitignore::matched_stripped::h7a0bda2c639b2ec5 (5 samples, 2.62%)</title><rect x="942.9" y="229" width="30.9" height="15.0" fill="rgb(212,10,6)" rx="2" ry="2" />
+<text text-anchor="" x="945.88" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_run_split_small (1 samples, 0.52%)</title><rect x="491.9" y="149" width="6.2" height="15.0" fill="rgb(230,147,2)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::create_gitignore::h7e4929ad98dfde95 (3 samples, 1.57%)</title><rect x="84.1" y="277" width="18.6" height="15.0" fill="rgb(226,182,39)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="788.4" y="181" width="6.2" height="15.0" fill="rgb(248,80,45)" rx="2" ry="2" />
+<text text-anchor="" x="791.43" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::char_to_escaped_literal::ha8a274c5f807085e (10 samples, 5.24%)</title><rect x="640.2" y="165" width="61.7" height="15.0" fill="rgb(208,90,26)" rx="2" ry="2" />
+<text text-anchor="" x="643.16" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`gl..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::build::h6d704e627ee34657 (5 samples, 2.62%)</title><rect x="1109.7" y="213" width="30.9" height="15.0" fill="rgb(225,156,34)" rx="2" ry="2" />
+<text text-anchor="" x="1112.69" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`alloc::string::String::push::hf7fa22f3fd0bf03e (2 samples, 1.05%)</title><rect x="646.3" y="117" width="12.4" height="15.0" fill="rgb(249,109,17)" rx="2" ry="2" />
+<text text-anchor="" x="649.34" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::exec::ExecBuilder::build::h69c0436e582cf51b (3 samples, 1.57%)</title><rect x="881.1" y="165" width="18.5" height="15.0" fill="rgb(206,121,10)" rx="2" ry="2" />
+<text text-anchor="" x="884.10" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::stat::h5152991fbf16eea4 (2 samples, 1.05%)</title><rect x="541.3" y="245" width="12.4" height="15.0" fill="rgb(229,66,6)" rx="2" ry="2" />
+<text text-anchor="" x="544.31" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::IgnoreBuilder::build::hb10533aaa1491968 (20 samples, 10.47%)</title><rect x="1054.1" y="245" width="123.5" height="15.0" fill="rgb(210,229,25)" rx="2" ry="2" />
+<text text-anchor="" x="1057.08" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..raw_vec..RawVec$LT$T$C$$u20$A$GT$$GT$::reserve_internal::h8f4d508c89dafe69 (1 samples, 0.52%)</title><rect x="59.4" y="181" width="6.2" height="15.0" fill="rgb(209,225,1)" rx="2" ry="2" />
+<text text-anchor="" x="62.42" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_rallocx (1 samples, 0.52%)</title><rect x="510.4" y="197" width="6.2" height="15.0" fill="rgb(239,15,24)" rx="2" ry="2" />
+<text text-anchor="" x="513.42" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::str::pattern::StrSearcher::new::h6486694261e1469d (1 samples, 0.52%)</title><rect x="1017.0" y="261" width="6.2" height="15.0" fill="rgb(253,12,5)" rx="2" ry="2" />
+<text text-anchor="" x="1020.02" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::bytes::RegexBuilder::build::h70f89d2509b58e30 (3 samples, 1.57%)</title><rect x="881.1" y="181" width="18.5" height="15.0" fill="rgb(242,215,19)" rx="2" ry="2" />
+<text text-anchor="" x="884.10" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open::h86b90bcfd526d2af (1 samples, 0.52%)</title><rect x="1146.8" y="181" width="6.1" height="15.0" fill="rgb(241,186,44)" rx="2" ry="2" />
+<text text-anchor="" x="1149.75" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..buffered..BufWriter$LT$W$GT$$GT$::flush_buf::h3ce1793352f6532b (1 samples, 0.52%)</title><rect x="1010.8" y="181" width="6.2" height="15.0" fill="rgb(245,200,27)" rx="2" ry="2" />
+<text text-anchor="" x="1013.84" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::streamer::Streamer::stream_node::h361165ba304870cd (171 samples, 89.53%)</title><rect x="121.2" y="309" width="1056.4" height="15.0" fill="rgb(225,213,7)" rx="2" ry="2" />
+<text text-anchor="" x="124.20" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`tre::streamer::Streamer::stream_node::h361165ba304870cd</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..sys..unix..fs..ReadDir$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h992f12a11a36ab7c (18 samples, 9.42%)</title><rect x="164.5" y="197" width="111.2" height="15.0" fill="rgb(209,151,47)" rx="2" ry="2" />
+<text text-anchor="" x="167.45" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT$std...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (2 samples, 1.05%)</title><rect x="658.7" y="149" width="12.3" height="15.0" fill="rgb(220,1,6)" rx="2" ry="2" />
+<text text-anchor="" x="661.69" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_tcache_alloc_small_hard (2 samples, 1.05%)</title><rect x="887.3" y="117" width="12.3" height="15.0" fill="rgb(208,201,51)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$walkdir..IntoIter$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h05d4918f100ede6a (39 samples, 20.42%)</title><rect x="139.7" y="277" width="241.0" height="15.0" fill="rgb(243,81,34)" rx="2" ry="2" />
+<text text-anchor="" x="142.74" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT$walkdir..IntoIter$u20$a..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::bytes::RegexBuilder::build::h70f89d2509b58e30 (1 samples, 0.52%)</title><rect x="874.9" y="197" width="6.2" height="15.0" fill="rgb(249,192,2)" rx="2" ry="2" />
+<text text-anchor="" x="877.92" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_strcmp (1 samples, 0.52%)</title><rect x="294.2" y="197" width="6.2" height="15.0" fill="rgb(220,217,51)" rx="2" ry="2" />
+<text text-anchor="" x="297.19" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSet::matches_candidate_into::hfd048a05a6045869 (4 samples, 2.09%)</title><rect x="949.1" y="213" width="24.7" height="15.0" fill="rgb(231,10,21)" rx="2" ry="2" />
+<text text-anchor="" x="952.06" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..Dense$u20$as$u20$aho_corasick..Transitions$GT$::goto::hb898ac37f7403241 (2 samples, 1.05%)</title><rect x="807.0" y="165" width="12.3" height="15.0" fill="rgb(242,206,49)" rx="2" ry="2" />
+<text text-anchor="" x="809.96" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`__rde_dealloc (1 samples, 0.52%)</title><rect x="634.0" y="165" width="6.2" height="15.0" fill="rgb(235,222,43)" rx="2" ry="2" />
+<text text-anchor="" x="636.98" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::PartialErrorBuilder::maybe_push_ignore_io::hce058a5e62deee7d (1 samples, 0.52%)</title><rect x="1177.6" y="277" width="6.2" height="15.0" fill="rgb(219,133,47)" rx="2" ry="2" />
+<text text-anchor="" x="1180.64" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..Lines$LT$B$GT$$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h75e7c2c393b6109c (4 samples, 2.09%)</title><rect x="584.6" y="213" width="24.7" height="15.0" fill="rgb(215,203,39)" rx="2" ry="2" />
+<text text-anchor="" x="587.55" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_parents::hcdba6ada70a227ef (61 samples, 31.94%)</title><rect x="553.7" y="277" width="376.8" height="15.0" fill="rgb(210,101,24)" rx="2" ry="2" />
+<text text-anchor="" x="556.66" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir::Ignore::add_parents::hcdba6ada70a2..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..AcAutomaton$LT$P$GT$$GT$::new::h18790ed163d4543f (1 samples, 0.52%)</title><rect x="1115.9" y="181" width="6.1" height="15.0" fill="rgb(225,134,15)" rx="2" ry="2" />
+<text text-anchor="" x="1118.86" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`_readdir_unlocked$INODE64 (1 samples, 0.52%)</title><rect x="164.5" y="165" width="6.1" height="15.0" fill="rgb(223,208,4)" rx="2" ry="2" />
+<text text-anchor="" x="167.45" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_c.dylib`readdir_r$INODE64 (1 samples, 0.52%)</title><rect x="53.2" y="197" width="6.2" height="15.0" fill="rgb(248,152,46)" rx="2" ry="2" />
+<text text-anchor="" x="56.25" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$core..option..Option$LT$$RF$$u27$a$u20$T$GT$$GT$::cloned::h64b371c91cbf2d84 (2 samples, 1.05%)</title><rect x="782.3" y="197" width="12.3" height="15.0" fill="rgb(222,163,19)" rx="2" ry="2" />
+<text text-anchor="" x="785.25" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`isfree (1 samples, 0.52%)</title><rect x="127.4" y="245" width="6.2" height="15.0" fill="rgb(209,92,14)" rx="2" ry="2" />
+<text text-anchor="" x="130.38" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_unicode::escape::h0a65a3b5d01a3dd4 (1 samples, 0.52%)</title><rect x="695.8" y="149" width="6.1" height="15.0" fill="rgb(245,112,25)" rx="2" ry="2" />
+<text text-anchor="" x="698.76" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`alloc::collections::btree::search::search_tree::h51d5116dc598c921 (1 samples, 0.52%)</title><rect x="955.2" y="181" width="6.2" height="15.0" fill="rgb(226,44,35)" rx="2" ry="2" />
+<text text-anchor="" x="958.24" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::walker::build::h8003e1df5cd1afbb (2 samples, 1.05%)</title><rect x="1177.6" y="325" width="12.4" height="15.0" fill="rgb(227,96,1)" rx="2" ry="2" />
+<text text-anchor="" x="1180.64" y="335.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::readdir::hc06eb7659d4fca60 (16 samples, 8.38%)</title><rect x="281.8" y="229" width="98.9" height="15.0" fill="rgb(224,15,26)" rx="2" ry="2" />
+<text text-anchor="" x="284.83" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`std::sy..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::walk::WalkBuilder::build::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h8b9bc6d652050862 (2 samples, 1.05%)</title><rect x="65.6" y="213" width="12.4" height="15.0" fill="rgb(253,170,25)" rx="2" ry="2" />
+<text text-anchor="" x="68.60" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::rt::lang_start_internal::h5737820e17c1b194 (190 samples, 99.48%)</title><rect x="16.2" y="405" width="1173.8" height="15.0" fill="rgb(252,36,6)" rx="2" ry="2" />
+<text text-anchor="" x="19.18" y="415.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`std::rt::lang_start_internal::h5737820e17c1b194</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__getattrlist (3 samples, 1.57%)</title><rect x="912.0" y="229" width="18.5" height="15.0" fill="rgb(230,96,0)" rx="2" ry="2" />
+<text text-anchor="" x="914.99" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__close_nocancel (1 samples, 0.52%)</title><rect x="47.1" y="229" width="6.1" height="15.0" fill="rgb(210,19,49)" rx="2" ry="2" />
+<text text-anchor="" x="50.07" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_tcache_fill_small (1 samples, 0.52%)</title><rect x="1128.2" y="133" width="6.2" height="15.0" fill="rgb(250,24,18)" rx="2" ry="2" />
+<text text-anchor="" x="1131.22" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::walker::build::h8003e1df5cd1afbb (25 samples, 13.09%)</title><rect x="1023.2" y="277" width="154.4" height="15.0" fill="rgb(236,163,54)" rx="2" ry="2" />
+<text text-anchor="" x="1026.19" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`tre::walker::bu..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::str::from_utf8::h2c92dfbc88098e33 (1 samples, 0.52%)</title><rect x="1078.8" y="181" width="6.2" height="15.0" fill="rgb(206,22,14)" rx="2" ry="2" />
+<text text-anchor="" x="1081.80" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`main (190 samples, 99.48%)</title><rect x="16.2" y="421" width="1173.8" height="15.0" fill="rgb(236,59,38)" rx="2" ry="2" />
+<text text-anchor="" x="19.18" y="431.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`main</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_tcache_alloc_small_hard (1 samples, 0.52%)</title><rect x="491.9" y="197" width="6.2" height="15.0" fill="rgb(206,103,18)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::PathBuf::_push::h2dae22f1228436c4 (1 samples, 0.52%)</title><rect x="1159.1" y="197" width="6.2" height="15.0" fill="rgb(240,188,32)" rx="2" ry="2" />
+<text text-anchor="" x="1162.11" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_bin_malloc_hard (2 samples, 1.05%)</title><rect x="887.3" y="85" width="12.3" height="15.0" fill="rgb(237,122,0)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::char_to_escaped_literal::ha8a274c5f807085e (1 samples, 0.52%)</title><rect x="115.0" y="197" width="6.2" height="15.0" fill="rgb(241,50,53)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (1 samples, 0.52%)</title><rect x="115.0" y="149" width="6.2" height="15.0" fill="rgb(242,127,45)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::Candidate::new::h65145ece43354cd2 (1 samples, 0.52%)</title><rect x="942.9" y="213" width="6.2" height="15.0" fill="rgb(232,139,19)" rx="2" ry="2" />
+<text text-anchor="" x="945.88" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open::h86b90bcfd526d2af (8 samples, 4.19%)</title><rect x="423.9" y="213" width="49.5" height="15.0" fill="rgb(216,176,38)" rx="2" ry="2" />
+<text text-anchor="" x="426.93" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`stat$INODE64 (2 samples, 1.05%)</title><rect x="1029.4" y="197" width="12.3" height="15.0" fill="rgb(216,226,41)" rx="2" ry="2" />
+<text text-anchor="" x="1032.37" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`alloc::slice::merge_sort::h04eea6b56b101667 (2 samples, 1.05%)</title><rect x="65.6" y="245" width="12.4" height="15.0" fill="rgb(211,27,2)" rx="2" ry="2" />
+<text text-anchor="" x="68.60" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_unicode::escape::h0a65a3b5d01a3dd4 (1 samples, 0.52%)</title><rect x="701.9" y="165" width="6.2" height="15.0" fill="rgb(208,160,7)" rx="2" ry="2" />
+<text text-anchor="" x="704.94" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::stat::h5152991fbf16eea4 (1 samples, 0.52%)</title><rect x="102.7" y="261" width="6.1" height="15.0" fill="rgb(230,5,45)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sync::once::Once::call_once::_$u7b$$u7b$closure$u7d$$u7d$::hb9a23dfa7ca8675b (1 samples, 0.52%)</title><rect x="1183.8" y="229" width="6.2" height="15.0" fill="rgb(241,59,30)" rx="2" ry="2" />
+<text text-anchor="" x="1186.82" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..stdio..Stdout$u20$as$u20$std..io..Write$GT$::write_fmt::h01e3821388fa2351 (3 samples, 1.57%)</title><rect x="998.5" y="261" width="18.5" height="15.0" fill="rgb(215,157,30)" rx="2" ry="2" />
+<text text-anchor="" x="1001.48" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex_syntax::escape::ha8a9b2824ec61815 (1 samples, 0.52%)</title><rect x="695.8" y="133" width="6.1" height="15.0" fill="rgb(220,44,24)" rx="2" ry="2" />
+<text text-anchor="" x="698.76" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::OpenOptions::_open::h8d1b766285386362 (2 samples, 1.05%)</title><rect x="1140.6" y="197" width="12.3" height="15.0" fill="rgb(246,3,44)" rx="2" ry="2" />
+<text text-anchor="" x="1143.58" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::exec::ProgramCacheInner::new::h419a93eada358eb5 (1 samples, 0.52%)</title><rect x="967.6" y="165" width="6.2" height="15.0" fill="rgb(252,167,50)" rx="2" ry="2" />
+<text text-anchor="" x="970.59" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add::hb35b4f04c4045400 (3 samples, 1.57%)</title><rect x="84.1" y="261" width="18.6" height="15.0" fill="rgb(211,196,46)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`arena_run_split_small (2 samples, 1.05%)</title><rect x="887.3" y="69" width="12.3" height="15.0" fill="rgb(216,91,27)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::slice::_$LT$impl$u20$$u5b$T$u5d$$GT$::copy_from_slice::h8727c881c68c6824 (1 samples, 0.52%)</title><rect x="776.1" y="181" width="6.2" height="15.0" fill="rgb(237,148,18)" rx="2" ry="2" />
+<text text-anchor="" x="779.07" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..AcAutomaton$LT$P$C$$u20$T$GT$$GT$::build::h85ae09184fc9bf29 (1 samples, 0.52%)</title><rect x="1115.9" y="165" width="6.1" height="15.0" fill="rgb(242,120,0)" rx="2" ry="2" />
+<text text-anchor="" x="1118.86" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::compile::Compiler::new::h5a9f202dbe46756d (1 samples, 0.52%)</title><rect x="504.2" y="165" width="6.2" height="15.0" fill="rgb(249,111,53)" rx="2" ry="2" />
+<text text-anchor="" x="507.24" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="553.7" y="261" width="6.1" height="15.0" fill="rgb(220,8,48)" rx="2" ry="2" />
+<text text-anchor="" x="556.66" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::fs::OpenOptions::_open::h8d1b766285386362 (3 samples, 1.57%)</title><rect x="84.1" y="245" width="18.6" height="15.0" fill="rgb(237,63,54)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`tre::main::h2656f494772da96c (189 samples, 98.95%)</title><rect x="22.4" y="341" width="1167.6" height="15.0" fill="rgb(241,77,29)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="351.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`tre::main::h2656f494772da96c</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`read (2 samples, 1.05%)</title><rect x="584.6" y="181" width="12.3" height="15.0" fill="rgb(227,144,35)" rx="2" ry="2" />
+<text text-anchor="" x="587.55" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::file_name::h83bcd098212db630 (1 samples, 0.52%)</title><rect x="71.8" y="181" width="6.2" height="15.0" fill="rgb(235,168,40)" rx="2" ry="2" />
+<text text-anchor="" x="74.78" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::sys::unix::fs::File::open::h86b90bcfd526d2af (1 samples, 0.52%)</title><rect x="1152.9" y="197" width="6.2" height="15.0" fill="rgb(233,29,6)" rx="2" ry="2" />
+<text text-anchor="" x="1155.93" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__getdirentries64 (16 samples, 8.38%)</title><rect x="170.6" y="165" width="98.9" height="15.0" fill="rgb(233,137,24)" rx="2" ry="2" />
+<text text-anchor="" x="173.63" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libsystem_k..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::App::get_matches::h52ec1aee86536623 (2 samples, 1.05%)</title><rect x="22.4" y="309" width="12.3" height="15.0" fill="rgb(219,68,36)" rx="2" ry="2" />
+<text text-anchor="" x="25.36" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`walkdir::DirEntry::file_name::h2839137b11d2f969 (2 samples, 1.05%)</title><rect x="65.6" y="197" width="12.4" height="15.0" fill="rgb(237,103,54)" rx="2" ry="2" />
+<text text-anchor="" x="68.60" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::GlobBuilder::build::h5efeca9c363b8ba1 (16 samples, 8.38%)</title><rect x="615.4" y="197" width="98.9" height="15.0" fill="rgb(216,68,39)" rx="2" ry="2" />
+<text text-anchor="" x="618.45" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`globset..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__getdirentries64 (1 samples, 0.52%)</title><rect x="53.2" y="181" width="6.2" height="15.0" fill="rgb(235,52,13)" rx="2" ry="2" />
+<text text-anchor="" x="56.25" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::dfa::Cache::new::h89325099f069ff9c (1 samples, 0.52%)</title><rect x="967.6" y="149" width="6.2" height="15.0" fill="rgb(210,183,31)" rx="2" ry="2" />
+<text text-anchor="" x="970.59" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::GitignoreBuilder::add::hb35b4f04c4045400 (33 samples, 17.28%)</title><rect x="578.4" y="229" width="203.9" height="15.0" fill="rgb(247,57,27)" rx="2" ry="2" />
+<text text-anchor="" x="581.38" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::gitignore::Git..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`fstatfs$INODE64 (4 samples, 2.09%)</title><rect x="356.0" y="213" width="24.7" height="15.0" fill="rgb(226,170,52)" rx="2" ry="2" />
+<text text-anchor="" x="358.97" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$vec_map..VecMap$LT$V$GT$$GT$::insert::hac3e4a8584759940 (1 samples, 0.52%)</title><rect x="34.7" y="293" width="6.2" height="15.0" fill="rgb(207,50,39)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_tcache_fill_small (1 samples, 0.52%)</title><rect x="491.9" y="181" width="6.2" height="15.0" fill="rgb(233,204,33)" rx="2" ry="2" />
+<text text-anchor="" x="494.88" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`write (1 samples, 0.52%)</title><rect x="1004.7" y="181" width="6.1" height="15.0" fill="rgb(243,136,53)" rx="2" ry="2" />
+<text text-anchor="" x="1007.66" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::matched::hc5084e426724df52 (7 samples, 3.66%)</title><rect x="936.7" y="245" width="43.2" height="15.0" fill="rgb(226,7,1)" rx="2" ry="2" />
+<text text-anchor="" x="939.70" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__open_nocancel (8 samples, 4.19%)</title><rect x="306.5" y="213" width="49.5" height="15.0" fill="rgb(216,81,35)" rx="2" ry="2" />
+<text text-anchor="" x="309.54" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >libs..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..vec..Vec$LT$T$GT$$u20$as$u20$alloc..vec..SpecExtend$LT$T$C$$u20$I$GT$$GT$::from_iter::hf8c8324c9382ddb8 (2 samples, 1.05%)</title><rect x="1029.4" y="245" width="12.3" height="15.0" fill="rgb(233,147,5)" rx="2" ry="2" />
+<text text-anchor="" x="1032.37" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..path..Path$u20$as$u20$core..cmp..PartialEq$GT$::eq::hb4b2032491cd3831 (1 samples, 0.52%)</title><rect x="133.6" y="277" width="6.1" height="15.0" fill="rgb(215,170,54)" rx="2" ry="2" />
+<text text-anchor="" x="136.56" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__close_nocancel (4 samples, 2.09%)</title><rect x="1054.1" y="229" width="24.7" height="15.0" fill="rgb(249,176,28)" rx="2" ry="2" />
+<text text-anchor="" x="1057.08" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >l..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..full..FullAcAutomaton$LT$P$GT$$GT$::new::hf10d8fe7cdcaee90 (2 samples, 1.05%)</title><rect x="1122.0" y="181" width="12.4" height="15.0" fill="rgb(205,67,39)" rx="2" ry="2" />
+<text text-anchor="" x="1125.04" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`clap::app::parser::Parser::add_arg::h5c50c82d336b5ef9 (1 samples, 0.52%)</title><rect x="34.7" y="309" width="6.2" height="15.0" fill="rgb(206,108,6)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_parents::hcdba6ada70a227ef (1 samples, 0.52%)</title><rect x="115.0" y="309" width="6.2" height="15.0" fill="rgb(230,143,39)" rx="2" ry="2" />
+<text text-anchor="" x="118.03" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_mallocx (2 samples, 1.05%)</title><rect x="887.3" y="149" width="12.3" height="15.0" fill="rgb(226,136,27)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::create_gitignore::h7e4929ad98dfde95 (22 samples, 11.52%)</title><rect x="386.9" y="261" width="135.9" height="15.0" fill="rgb(243,104,2)" rx="2" ry="2" />
+<text text-anchor="" x="389.86" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore::dir::..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__mmap (1 samples, 0.52%)</title><rect x="34.7" y="165" width="6.2" height="15.0" fill="rgb(252,39,33)" rx="2" ry="2" />
+<text text-anchor="" x="37.71" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_pthread.dylib`pthread_mutex_lock (1 samples, 0.52%)</title><rect x="300.4" y="197" width="6.1" height="15.0" fill="rgb(228,196,10)" rx="2" ry="2" />
+<text text-anchor="" x="303.37" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$alloc..collections..btree..map..Entry$LT$$u27$a$C$$u20$K$C$$u20$V$GT$$GT$::or_insert::ha84e2c76f549f3fe (1 samples, 0.52%)</title><rect x="868.7" y="197" width="6.2" height="15.0" fill="rgb(237,190,40)" rx="2" ry="2" />
+<text text-anchor="" x="871.74" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::canonicalize::h2e8d690e62d8c70e (3 samples, 1.57%)</title><rect x="912.0" y="261" width="18.5" height="15.0" fill="rgb(225,138,52)" rx="2" ry="2" />
+<text text-anchor="" x="914.99" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSet::is_empty::h46925c450b449227 (1 samples, 0.52%)</title><rect x="930.5" y="245" width="6.2" height="15.0" fill="rgb(213,114,54)" rx="2" ry="2" />
+<text text-anchor="" x="933.52" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::ffi::c_str::CString::from_vec_unchecked::hc97ab922efdbee8e (1 samples, 0.52%)</title><rect x="102.7" y="245" width="6.1" height="15.0" fill="rgb(216,72,32)" rx="2" ry="2" />
+<text text-anchor="" x="105.67" y="255.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::exec::ExecBuilder::build::h69c0436e582cf51b (1 samples, 0.52%)</title><rect x="504.2" y="181" width="6.2" height="15.0" fill="rgb(206,6,36)" rx="2" ry="2" />
+<text text-anchor="" x="507.24" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__mmap (2 samples, 1.05%)</title><rect x="887.3" y="37" width="12.3" height="15.0" fill="rgb(249,17,52)" rx="2" ry="2" />
+<text text-anchor="" x="890.28" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::MatchStrategy::new::h2044eb998fb16693 (1 samples, 0.52%)</title><rect x="498.1" y="213" width="6.1" height="15.0" fill="rgb(209,66,39)" rx="2" ry="2" />
+<text text-anchor="" x="501.06" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`__rust_dealloc (1 samples, 0.52%)</title><rect x="1140.6" y="181" width="6.2" height="15.0" fill="rgb(214,180,44)" rx="2" ry="2" />
+<text text-anchor="" x="1143.58" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`core::fmt::write::h34603e2839700821 (1 samples, 0.52%)</title><rect x="1017.0" y="277" width="6.2" height="15.0" fill="rgb(216,1,5)" rx="2" ry="2" />
+<text text-anchor="" x="1020.02" y="287.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`__rust_probestack (1 samples, 0.52%)</title><rect x="1134.4" y="149" width="6.2" height="15.0" fill="rgb(252,37,12)" rx="2" ry="2" />
+<text text-anchor="" x="1137.40" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..fs..ReadDir$u20$as$u20$core..iter..iterator..Iterator$GT$::next::h4743abcb7ddfe39c (1 samples, 0.52%)</title><rect x="53.2" y="229" width="6.2" height="15.0" fill="rgb(251,76,40)" rx="2" ry="2" />
+<text text-anchor="" x="56.25" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (2 samples, 1.05%)</title><rect x="1091.2" y="149" width="12.3" height="15.0" fill="rgb(211,200,47)" rx="2" ry="2" />
+<text text-anchor="" x="1094.15" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::GlobBuilder::build::h5efeca9c363b8ba1 (3 samples, 1.57%)</title><rect x="1091.2" y="197" width="18.5" height="15.0" fill="rgb(231,93,27)" rx="2" ry="2" />
+<text text-anchor="" x="1094.15" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::dir::Ignore::add_child_path::h075ebbc5683745d2 (5 samples, 2.62%)</title><rect x="78.0" y="293" width="30.8" height="15.0" fill="rgb(210,151,15)" rx="2" ry="2" />
+<text text-anchor="" x="80.96" y="303.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tr..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::io::append_to_string::h9f0115bcc4d14f9a (1 samples, 0.52%)</title><rect x="1078.8" y="197" width="6.2" height="15.0" fill="rgb(232,76,53)" rx="2" ry="2" />
+<text text-anchor="" x="1081.80" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::GlobSetBuilder::build::h8d1dbf6f18e8f054 (4 samples, 2.09%)</title><rect x="1115.9" y="197" width="24.7" height="15.0" fill="rgb(229,20,53)" rx="2" ry="2" />
+<text text-anchor="" x="1118.86" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >t..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::glob::GlobBuilder::new::h37600a76ae4ea0b7 (1 samples, 0.52%)</title><rect x="714.3" y="197" width="6.2" height="15.0" fill="rgb(208,151,53)" rx="2" ry="2" />
+<text text-anchor="" x="717.29" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memcmp (1 samples, 0.52%)</title><rect x="856.4" y="181" width="6.2" height="15.0" fill="rgb(253,94,7)" rx="2" ry="2" />
+<text text-anchor="" x="859.39" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::Gitignore::global::he88941967aee926a (16 samples, 8.38%)</title><rect x="1078.8" y="229" width="98.8" height="15.0" fill="rgb(245,198,26)" rx="2" ry="2" />
+<text text-anchor="" x="1081.80" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`ignore:..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_platform.dylib`_platform_memmove$VARIANT$Haswell (1 samples, 0.52%)</title><rect x="145.9" y="213" width="6.2" height="15.0" fill="rgb(243,90,14)" rx="2" ry="2" />
+<text text-anchor="" x="148.92" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_sdallocx (1 samples, 0.52%)</title><rect x="127.4" y="261" width="6.2" height="15.0" fill="rgb(236,119,29)" rx="2" ry="2" />
+<text text-anchor="" x="130.38" y="271.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$std..io..buffered..LineWriter$LT$W$GT$$u20$as$u20$std..io..Write$GT$::write::h3fe95305a1580770 (2 samples, 1.05%)</title><rect x="1004.7" y="197" width="12.3" height="15.0" fill="rgb(242,73,47)" rx="2" ry="2" />
+<text text-anchor="" x="1007.66" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$thread_local..CachedThreadLocal$LT$T$GT$$GT$::get_or_try_slow::h688939fe2d1ad4a7 (2 samples, 1.05%)</title><rect x="961.4" y="181" width="12.4" height="15.0" fill="rgb(212,40,36)" rx="2" ry="2" />
+<text text-anchor="" x="964.41" y="191.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$$RF$$u27$a$u20$mut$u20$I$u20$as$u20$core..iter..iterator..Iterator$GT$::next::ha3ef7d0d8685c8cc (12 samples, 6.28%)</title><rect x="40.9" y="309" width="74.1" height="15.0" fill="rgb(224,107,20)" rx="2" ry="2" />
+<text text-anchor="" x="43.89" y="319.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >tre`_$LT..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::to_path_buf::hdb9866edfd6bca3f (2 samples, 1.05%)</title><rect x="473.4" y="229" width="12.3" height="15.0" fill="rgb(248,103,54)" rx="2" ry="2" />
+<text text-anchor="" x="476.35" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`std::path::Path::new::h1fdb0ec73e4ea737 (1 samples, 0.52%)</title><rect x="973.8" y="213" width="6.1" height="15.0" fill="rgb(240,73,10)" rx="2" ry="2" />
+<text text-anchor="" x="976.77" y="223.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>libsystem_kernel.dylib`__open (3 samples, 1.57%)</title><rect x="84.1" y="197" width="18.6" height="15.0" fill="rgb(230,125,17)" rx="2" ry="2" />
+<text text-anchor="" x="87.14" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`regex::re_builder::bytes::RegexBuilder::build::h70f89d2509b58e30 (1 samples, 0.52%)</title><rect x="1134.4" y="165" width="6.2" height="15.0" fill="rgb(213,176,35)" rx="2" ry="2" />
+<text text-anchor="" x="1137.40" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`ignore::gitignore::Gitignore::strip::he28b61caa7e00b83 (1 samples, 0.52%)</title><rect x="973.8" y="229" width="6.1" height="15.0" fill="rgb(246,223,33)" rx="2" ry="2" />
+<text text-anchor="" x="976.77" y="239.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`je_arena_ralloc (1 samples, 0.52%)</title><rect x="627.8" y="133" width="6.2" height="15.0" fill="rgb(209,46,22)" rx="2" ry="2" />
+<text text-anchor="" x="630.80" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..autiter..MatchesOverlapping$LT$$u27$a$C$$u20$$u27$s$C$$u20$P$C$$u20$A$GT$$u20$as$u20$core..iter..iterator..Iterator$GT$::next::hc868a6829a499d76 (1 samples, 0.52%)</title><rect x="949.1" y="197" width="6.1" height="15.0" fill="rgb(209,41,10)" rx="2" ry="2" />
+<text text-anchor="" x="952.06" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`globset::pathutil::os_str_bytes::h0bb76e65c03c57e4 (1 samples, 0.52%)</title><rect x="942.9" y="197" width="6.2" height="15.0" fill="rgb(221,65,24)" rx="2" ry="2" />
+<text text-anchor="" x="945.88" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tre`_$LT$aho_corasick..full..FullAcAutomaton$LT$P$GT$$GT$::new::hf10d8fe7cdcaee90 (3 samples, 1.57%)</title><rect x="837.9" y="197" width="18.5" height="15.0" fill="rgb(224,213,20)" rx="2" ry="2" />
+<text text-anchor="" x="840.85" y="207.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+</svg>

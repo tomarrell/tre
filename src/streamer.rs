@@ -55,6 +55,7 @@ impl Streamer {
     }
 
     /// parse and stream an individual node, correctly printing its representation and updating statistics.
+    // In need of optimization
     fn stream_node(&mut self, node: &DirEntry, is_last: bool) -> Result<(), Error> {
         let mut is_last = is_last;
         let file_name = node.file_name().to_owned().into_string().unwrap();

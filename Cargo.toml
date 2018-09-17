@@ -7,3 +7,6 @@ authors = ["Jacky Zhen <me@jackyzhen.com>", "Tom Arrell <tom.arrell@gmail.com>"]
 clap = "2.32.0"
 ignore = "0.4.3"
 colored = "1.6.1"
+
+[profile.release]
+debug = true
