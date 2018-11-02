@@ -13,11 +13,7 @@ Tre doesn't aim for feature parity with tree necessarily, but aims to provide us
 Currently installation is only from source.
 
 ```bash
-$ git clone [this repo]
-
-$ cd tre
-
-$ cargo install
+$ cargo install tre
 
 $ tre [options]
 ```
@@ -40,6 +36,9 @@ Benchmark #1: tre ~ -l 4
 
   Range (min … max):   344.1 ms … 365.7 ms
 ```
+
+# Contributing
+If you find an bug with Tre, please log an issue on the repository. Feel free to suggest ideas for features you think might be useful. 
 
 # License
 Licensed under **MIT** *or* **GNU GPL v3.0**, at your discretion.
