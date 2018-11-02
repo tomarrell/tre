@@ -2,6 +2,10 @@
 name = "tre"
 version = "0.1.0"
 authors = ["Jacky Zhen <me@jackyzhen.com>", "Tom Arrell <tom.arrell@gmail.com>"]
+description = "A simple, fast and interactive alternative to 'tree.'"
+homepage = "https://github.com/tomarrell/tre"
+repository = "https://github.com/tomarrell/tre"
+license = "MIT/GPL-3.0"
 
 [dependencies]
 clap = "2.32.0"
