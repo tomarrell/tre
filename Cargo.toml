@@ -1,6 +1,6 @@
 [package]
 name = "tre"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Jacky Zhen <me@jackyzhen.com>", "Tom Arrell <tom.arrell@gmail.com>"]
 description = "A simple, fast and interactive alternative to 'tree.'"
 homepage = "https://github.com/tomarrell/tre"
